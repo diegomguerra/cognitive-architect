@@ -12,7 +12,6 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -45,8 +44,7 @@ jobs:
         working-directory: ios/App
         run: |
           if [ -f Podfile ]; then
-            cd ..
-            bundle exec pod install --repo-update
+            pod install --repo-update
           else
             echo "No Podfile found; skipping pods"
           fi
@@ -57,26 +55,25 @@ jobs:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
           mkdir -p fastlane/keys
-          echo "$APP_STORE_CONNECT_API_KEY" > fastlane/keys/AuthKey.p8
-          ls -la fastlane/keys
+          printf '%s' "$APP_STORE_CONNECT_API_KEY" > fastlane/keys/AuthKey.p8
 
       - name: Setup signing (match)
         working-directory: ios
         env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-        run: |
-          bundle exec fastlane match appstore --readonly
+        run: bundle exec fastlane match appstore --readonly
 
       - name: Build & Upload to TestFlight
         working-directory: ios
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-        run: |
-          # If your repo has a lane testflight, you can switch to:
-          # bundle exec fastlane testflight
-          bundle exec fastlane build
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        run: bundle exec fastlane build
