@@ -14,6 +14,216 @@ export type Database = {
   }
   public: {
     Tables: {
+      action_logs: {
+        Row: {
+          action_type: string
+          created_at: string
+          day: string
+          id: string
+          payload: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          action_type: string
+          created_at?: string
+          day: string
+          id?: string
+          payload?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          action_type?: string
+          created_at?: string
+          day?: string
+          id?: string
+          payload?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      checkpoints: {
+        Row: {
+          checkpoint_type: string
+          created_at: string
+          data: Json
+          day: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          checkpoint_type: string
+          created_at?: string
+          data?: Json
+          day: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          checkpoint_type?: string
+          created_at?: string
+          data?: Json
+          day?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      computed_states: {
+        Row: {
+          created_at: string
+          day: string
+          id: string
+          level: string | null
+          phase: string | null
+          pillars: Json
+          raw_input: Json
+          score: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          day: string
+          id?: string
+          level?: string | null
+          phase?: string | null
+          pillars?: Json
+          raw_input?: Json
+          score?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          day?: string
+          id?: string
+          level?: string | null
+          phase?: string | null
+          pillars?: Json
+          raw_input?: Json
+          score?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      daily_reviews: {
+        Row: {
+          clarity_score: number | null
+          created_at: string
+          day: string
+          energy_score: number | null
+          focus_score: number | null
+          id: string
+          mood_score: number | null
+          notes: string | null
+          stress_score: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          clarity_score?: number | null
+          created_at?: string
+          day: string
+          energy_score?: number | null
+          focus_score?: number | null
+          id?: string
+          mood_score?: number | null
+          notes?: string | null
+          stress_score?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          clarity_score?: number | null
+          created_at?: string
+          day?: string
+          energy_score?: number | null
+          focus_score?: number | null
+          id?: string
+          mood_score?: number | null
+          notes?: string | null
+          stress_score?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          daily_summary: boolean
+          email_enabled: boolean
+          id: string
+          insight_alerts: boolean
+          push_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          daily_summary?: boolean
+          email_enabled?: boolean
+          id?: string
+          insight_alerts?: boolean
+          push_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          daily_summary?: boolean
+          email_enabled?: boolean
+          id?: string
+          insight_alerts?: boolean
+          push_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          body: string | null
+          created_at: string
+          data: Json
+          id: string
+          read: boolean
+          title: string
+          type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          read?: boolean
+          title: string
+          type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          data?: Json
+          id?: string
+          read?: boolean
+          title?: string
+          type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       participantes: {
         Row: {
           altura_cm: number | null
@@ -280,6 +490,45 @@ export type Database = {
         }
         Relationships: []
       }
+      user_baselines: {
+        Row: {
+          created_at: string
+          id: string
+          mean: number
+          metric: string
+          sample_count: number
+          stddev: number
+          updated_at: string
+          user_id: string
+          window_end: string | null
+          window_start: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          mean: number
+          metric: string
+          sample_count?: number
+          stddev: number
+          updated_at?: string
+          user_id: string
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          mean?: number
+          metric?: string
+          sample_count?: number
+          stddev?: number
+          updated_at?: string
+          user_id?: string
+          window_end?: string | null
+          window_start?: string | null
+        }
+        Relationships: []
+      }
       user_consents: {
         Row: {
           accepted_privacy: boolean
@@ -364,6 +613,30 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       webhook_logs: {
         Row: {
           created_at: string
@@ -408,9 +681,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
+      app_role: "admin" | "participant" | "researcher"
       janela_dose: "DIA" | "TARDE" | "NOITE"
       perfil_atividade:
         | "CONDUCAO"
@@ -548,6 +828,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["admin", "participant", "researcher"],
       janela_dose: ["DIA", "TARDE", "NOITE"],
       perfil_atividade: [
         "CONDUCAO",

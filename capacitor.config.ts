@@ -1,12 +1,9 @@
-import { CapacitorConfig } from '@capacitor/cli';
+import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.vyrlabs.app',
-  appName: 'VYR',
-  webDir: 'dist',
-  server: {
-    androidScheme: 'https',
-  },
+  appName: 'VYR Labs',
+  webDir: 'dist'
 };
 
 export default config;
