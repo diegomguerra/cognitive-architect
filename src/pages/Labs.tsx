@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import BackButton from '@/components/BackButton';
 import BottomNav from '@/components/BottomNav';
 import PerceptionsTab from '@/components/labs/PerceptionsTab';
 import ReviewsTab from '@/components/labs/ReviewsTab';
@@ -26,9 +26,7 @@ const Labs = () => {
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center gap-3 px-5 py-4">
-        <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={20} />
-        </button>
+        <BackButton />
         <h1 className="text-lg font-semibold text-foreground">Labs</h1>
       </header>
 
