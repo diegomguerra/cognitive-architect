@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, User, Save } from 'lucide-react';
+import { ArrowLeft, Save } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
+import AvatarUpload from '@/components/AvatarUpload';
 import BottomNav from '@/components/BottomNav';
 import { toast } from 'sonner';
 
@@ -18,6 +19,7 @@ const Profile = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [form, setForm] = useState({
     nome_publico: '',
     data_nascimento: '',
@@ -42,6 +44,10 @@ const Profile = () => {
           });
         }
       });
+    // Load avatar
+    const { data } = supabase.storage.from('avatars').getPublicUrl(`${user.id}/avatar.jpg`);
+    // Check if exists by attempting a head-like fetch
+    setAvatarUrl(data.publicUrl);
   }, [user?.id]);
 
   const handleSave = async () => {
@@ -73,6 +79,8 @@ const Profile = () => {
     }
   };
 
+  const inputClass = "w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground";
+
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center gap-3 px-5 py-4">
@@ -85,32 +93,20 @@ const Profile = () => {
       <div className="px-5 mt-2 space-y-5">
         {/* Avatar */}
         <div className="flex flex-col items-center">
-          <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mb-2">
-            <User size={32} className="text-muted-foreground" />
-          </div>
-          <p className="text-xs text-muted-foreground">{user?.email}</p>
+          <AvatarUpload currentUrl={avatarUrl} onUploaded={setAvatarUrl} />
+          <p className="text-xs text-muted-foreground mt-2">{user?.email}</p>
         </div>
 
         {/* Form */}
         <div className="space-y-4">
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Nome público</label>
-            <input
-              value={form.nome_publico}
-              onChange={(e) => setForm((f) => ({ ...f, nome_publico: e.target.value }))}
-              className="w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground"
-              placeholder="Como quer ser chamado"
-            />
+            <input value={form.nome_publico} onChange={(e) => setForm((f) => ({ ...f, nome_publico: e.target.value }))} className={inputClass} placeholder="Como quer ser chamado" />
           </div>
 
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Data de nascimento</label>
-            <input
-              type="date"
-              value={form.data_nascimento}
-              onChange={(e) => setForm((f) => ({ ...f, data_nascimento: e.target.value }))}
-              className="w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground"
-            />
+            <input type="date" value={form.data_nascimento} onChange={(e) => setForm((f) => ({ ...f, data_nascimento: e.target.value }))} className={inputClass} />
           </div>
 
           <div>
@@ -135,41 +131,24 @@ const Profile = () => {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Altura (cm)</label>
-              <input
-                type="number"
-                value={form.altura_cm}
-                onChange={(e) => setForm((f) => ({ ...f, altura_cm: e.target.value }))}
-                className="w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground"
-                placeholder="175"
-              />
+              <input type="number" value={form.altura_cm} onChange={(e) => setForm((f) => ({ ...f, altura_cm: e.target.value }))} className={inputClass} placeholder="175" />
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Peso (kg)</label>
-              <input
-                type="number"
-                value={form.peso_kg}
-                onChange={(e) => setForm((f) => ({ ...f, peso_kg: e.target.value }))}
-                className="w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground"
-                placeholder="70"
-              />
+              <input type="number" value={form.peso_kg} onChange={(e) => setForm((f) => ({ ...f, peso_kg: e.target.value }))} className={inputClass} placeholder="70" />
             </div>
           </div>
 
           <div>
             <label className="text-xs text-muted-foreground mb-1 block">Objetivo principal</label>
-            <input
-              value={form.objetivo_principal}
-              onChange={(e) => setForm((f) => ({ ...f, objetivo_principal: e.target.value }))}
-              className="w-full rounded-xl bg-card border border-border px-4 py-3 text-sm text-foreground"
-              placeholder="Ex: melhorar foco no trabalho"
-            />
+            <input value={form.objetivo_principal} onChange={(e) => setForm((f) => ({ ...f, objetivo_principal: e.target.value }))} className={inputClass} placeholder="Ex: melhorar foco no trabalho" />
           </div>
         </div>
 
         <button
           onClick={handleSave}
           disabled={loading}
-          className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50"
+          className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
         >
           <Save size={16} />
           {loading ? 'Salvando...' : 'Salvar alterações'}
