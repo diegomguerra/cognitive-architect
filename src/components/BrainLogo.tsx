@@ -14,7 +14,7 @@ const BrainLogo = ({ size = 48 }: BrainLogoProps) => {
         src={brainIcon}
         alt="VYR"
         className="w-full h-full object-cover"
-        style={{ animation: 'glow-pulse 3s ease-in-out infinite' }}
+        style={{ filter: 'grayscale(100%) brightness(0.85) contrast(1.1)', opacity: 0.8 }}
       />
     </div>
   );
