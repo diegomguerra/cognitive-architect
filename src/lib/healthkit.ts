@@ -1,6 +1,10 @@
 /**
  * HealthKit integration via @capgo/capacitor-health (Capacitor 8)
- * This module is a no-op on web — only functional in iOS native context.
+ * Handles read+write for types supported by the plugin.
+ * Types NOT supported by plugin (bodyTemperature, bloodPressure, vo2Max, activeEnergy)
+ * are handled by the native VYRHealthBridge — see healthkit-bridge.ts.
+ *
+ * "Stress" is a DERIVED metric — never written to HealthKit.
  */
 
 import { forceRefreshSession, requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
@@ -8,12 +12,24 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 
-const HEALTH_READ_TYPES: HealthDataType[] = [
+// ── Types ────────────────────────────────────────────────────────────
+
+export const HEALTH_READ_TYPES: HealthDataType[] = [
   'heartRate',
   'restingHeartRate',
   'heartRateVariability',
   'sleep',
   'steps',
+  'oxygenSaturation',
+  'respiratoryRate',
+];
+
+export const HEALTH_WRITE_TYPES: HealthDataType[] = [
+  'steps',
+  'heartRate',
+  'restingHeartRate',
+  'heartRateVariability',
+  'sleep',
   'oxygenSaturation',
   'respiratoryRate',
 ];
@@ -25,9 +41,15 @@ export interface SleepSampleProcessed {
   value: number;
 }
 
-/**
- * Check if HealthKit is available (iOS only)
- */
+export interface AuthorizationStatusResult {
+  readAuthorized: string[];
+  readDenied: string[];
+  writeAuthorized: string[];
+  writeDenied: string[];
+}
+
+// ── Availability ─────────────────────────────────────────────────────
+
 export async function isHealthKitAvailable(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
@@ -38,17 +60,20 @@ export async function isHealthKitAvailable(): Promise<boolean> {
   }
 }
 
+// ── Authorization ────────────────────────────────────────────────────
+
 /**
- * Request HealthKit read permissions
+ * Request HealthKit read+write permissions.
+ * Returns true if the dialog was shown (does NOT mean all types were granted).
  */
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
     await Health.requestAuthorization({
       read: HEALTH_READ_TYPES,
-      write: [],
+      write: HEALTH_WRITE_TYPES,
     });
-    // CRITICAL: Force session refresh after native dialog
+    // Force session refresh after native dialog
     await forceRefreshSession();
     return true;
   } catch (e) {
@@ -59,8 +84,84 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
 }
 
 /**
- * Calculate sleep quality from sleep samples
+ * Check authorization status per type BEFORE and AFTER requesting.
+ * Uses plugin's checkAuthorization to get granular status.
  */
+export async function checkHealthKitAuth(): Promise<AuthorizationStatusResult | null> {
+  try {
+    const { Health } = await import('@capgo/capacitor-health');
+    const result = await Health.checkAuthorization({
+      read: HEALTH_READ_TYPES,
+      write: HEALTH_WRITE_TYPES,
+    });
+
+    const status: AuthorizationStatusResult = {
+      readAuthorized: [],
+      readDenied: [],
+      writeAuthorized: [],
+      writeDenied: [],
+    };
+
+    // Parse plugin response — checkAuthorization returns per-type status
+    if (result && typeof result === 'object') {
+      for (const t of HEALTH_READ_TYPES) {
+        const key = `read_${t}`;
+        if ((result as any)[key] === true || (result as any)[t] === true) {
+          status.readAuthorized.push(t);
+        } else {
+          status.readDenied.push(t);
+        }
+      }
+      for (const t of HEALTH_WRITE_TYPES) {
+        const key = `write_${t}`;
+        if ((result as any)[key] === true) {
+          status.writeAuthorized.push(t);
+        } else {
+          status.writeDenied.push(t);
+        }
+      }
+    }
+
+    console.info('[healthkit] auth status:', status);
+    return status;
+  } catch (e) {
+    console.warn('[healthkit] checkAuthorization failed:', e);
+    return null;
+  }
+}
+
+// ── Write samples via plugin ─────────────────────────────────────────
+
+/**
+ * Write a single sample to Apple Health via the plugin.
+ * Only for types in HEALTH_WRITE_TYPES.
+ * For bodyTemperature, bloodPressure, vo2Max, activeEnergy → use healthkit-bridge.ts.
+ * For stress → NEVER write to HealthKit (derived metric, Supabase only).
+ */
+export async function writeHealthKitSample(
+  dataType: HealthDataType,
+  value: number,
+  opts?: { startDate?: string; endDate?: string; unit?: string }
+): Promise<boolean> {
+  try {
+    const { Health } = await import('@capgo/capacitor-health');
+    await Health.saveSample({
+      dataType,
+      value,
+      startDate: opts?.startDate ?? new Date().toISOString(),
+      endDate: opts?.endDate,
+      unit: opts?.unit as any,
+    });
+    console.info('[healthkit][WRITE] saved', { dataType, value });
+    return true;
+  } catch (e) {
+    console.error('[healthkit][WRITE] failed', { dataType, error: e });
+    return false;
+  }
+}
+
+// ── Sleep quality calculation ────────────────────────────────────────
+
 export function calculateSleepQuality(samples: HealthSample[]): {
   durationHours: number;
   quality: number;
@@ -94,18 +195,44 @@ export function calculateSleepQuality(samples: HealthSample[]): {
   };
 }
 
-/**
- * Convert HRV (SDNN in ms) to a 0-100 scale using logarithmic transformation
- */
+// ── HRV conversion ───────────────────────────────────────────────────
+
 export function convertHRVtoScale(hrvMs: number): number {
   if (hrvMs <= 0) return 0;
   return Math.min(100, Math.round((Math.log(hrvMs) / Math.log(200)) * 100));
 }
 
-/**
- * Sync HealthKit data to Supabase with full diagnostic logging
- */
+// ── Incremental sync helpers ─────────────────────────────────────────
+
+const ANCHOR_PREFIX = 'hk_last_sync_';
+
+function getLastSyncTimestamp(dataType: string): string {
+  try {
+    const stored = localStorage.getItem(`${ANCHOR_PREFIX}${dataType}`);
+    if (stored) return stored;
+  } catch { /* localStorage unavailable */ }
+  // Default: 24h ago
+  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+}
+
+function setLastSyncTimestamp(dataType: string, ts: string): void {
+  try {
+    localStorage.setItem(`${ANCHOR_PREFIX}${dataType}`, ts);
+  } catch { /* localStorage unavailable */ }
+}
+
+// ── Sync HealthKit data to Supabase (incremental) ────────────────────
+
+let syncLock = false;
+
 export async function syncHealthKitData(): Promise<boolean> {
+  // Debounce / lock
+  if (syncLock) {
+    console.warn('[healthkit] sync already in progress, skipping');
+    return false;
+  }
+  syncLock = true;
+
   try {
     const available = await isHealthKitAvailable();
     if (!available) {
@@ -117,28 +244,28 @@ export async function syncHealthKitData(): Promise<boolean> {
     const { Health } = await import('@capgo/capacitor-health');
 
     const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const today = now.toISOString().split('T')[0];
 
-    const queryOpts = {
-      startDate: yesterday.toISOString(),
+    // Build per-type query windows (incremental via timestamp anchor)
+    const buildOpts = (dataType: string) => ({
+      startDate: getLastSyncTimestamp(dataType),
       endDate: now.toISOString(),
       limit: 500,
-    };
+    });
 
     const empty = { samples: [] as HealthSample[] };
     const [hrData, rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] =
       await Promise.all([
-        Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'restingHeartRate' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'heartRateVariability' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'oxygenSaturation' }).catch(() => empty),
-        Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('heartRate'), dataType: 'heartRate' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('restingHeartRate'), dataType: 'restingHeartRate' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('heartRateVariability'), dataType: 'heartRateVariability' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('sleep'), dataType: 'sleep' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('steps'), dataType: 'steps' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('oxygenSaturation'), dataType: 'oxygenSaturation' }).catch(() => empty),
+        Health.readSamples({ ...buildOpts('respiratoryRate'), dataType: 'respiratoryRate' }).catch(() => empty),
       ]);
 
-    console.info('[healthkit] samples read', {
+    console.info('[healthkit] samples read (incremental)', {
       hr: hrData.samples.length,
       rhr: rhrData.samples.length,
       hrv: hrvData.samples.length,
@@ -176,7 +303,6 @@ export async function syncHealthKitData(): Promise<boolean> {
     };
 
     console.info('[healthkit] metrics computed', {
-      sampleKeys: Object.keys(metrics),
       rhr: metrics.rhr,
       hrv: metrics.hrv_sdnn,
       sleep: metrics.sleep_duration_hours,
@@ -197,7 +323,12 @@ export async function syncHealthKitData(): Promise<boolean> {
           { onConflict: 'user_id,day,source_provider' }
         )
         .select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint } : null };
+      return {
+        data: res.data,
+        error: res.error
+          ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint }
+          : null,
+      };
     }, { table: 'ring_daily_data', operation: 'upsert' });
 
     if (result.error) {
@@ -218,12 +349,25 @@ export async function syncHealthKitData(): Promise<boolean> {
           { onConflict: 'user_id,provider' }
         )
         .select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint } : null };
+      return {
+        data: res.data,
+        error: res.error
+          ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint }
+          : null,
+      };
     }, { table: 'user_integrations', operation: 'upsert' });
+
+    // Update anchors (timestamp-based incremental)
+    const nowIso = now.toISOString();
+    for (const dt of ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate']) {
+      setLastSyncTimestamp(dt, nowIso);
+    }
 
     return true;
   } catch (e) {
     console.error('[DB][ERR] syncHealthKitData exception:', e);
     return false;
+  } finally {
+    syncLock = false;
   }
 }
