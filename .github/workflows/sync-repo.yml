@@ -12,7 +12,6 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -21,8 +20,8 @@ jobs:
 
       - name: Push to destination repo
         env:
-          DEST_REPO_TOKEN: ${{ secrets.DEST_REPO_TOKEN }}
           DEST_REPO: ${{ secrets.DEST_REPO }}
+          DEST_REPO_TOKEN: ${{ secrets.DEST_REPO_TOKEN }}
         run: |
           git remote remove destination 2>/dev/null || true
           git remote add destination "https://x-access-token:${DEST_REPO_TOKEN}@github.com/${DEST_REPO}.git"
