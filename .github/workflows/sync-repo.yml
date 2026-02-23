@@ -5,16 +5,25 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: sync-repo-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Push to destination repo
+        env:
+          DEST_REPO_TOKEN: ${{ secrets.DEST_REPO_TOKEN }}
+          DEST_REPO: ${{ secrets.DEST_REPO }}
         run: |
-          git remote add destination "https://x-access-token:${{ secrets.DEST_REPO_TOKEN }}@github.com/${{ secrets.DEST_REPO }}.git" 2>/dev/null || true
-          git push destination main --force
+          git remote remove destination 2>/dev/null || true
+          git remote add destination "https://x-access-token:${DEST_REPO_TOKEN}@github.com/${DEST_REPO}.git"
+          git push destination main --force-with-lease

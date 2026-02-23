@@ -12,7 +12,8 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
+
     steps:
       - uses: actions/checkout@v4
 
@@ -21,40 +22,61 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - name: Install JS deps
+        run: npm ci
 
-      - run: npm run build
+      - name: Build web
+        run: npm run build
 
-      - name: Sync Capacitor
+      - name: Sync Capacitor (iOS)
         run: npx cap sync ios
 
-      - name: Patch iOS (HealthKit entitlements)
+      - name: Patch iOS (Info.plist + entitlements)
         run: node scripts/patch-ios.mjs
 
-      - name: Install CocoaPods (if needed)
+      - name: Setup Ruby (Fastlane)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: ios
+
+      - name: Install CocoaPods
         working-directory: ios/App
         run: |
           if [ -f Podfile ]; then
-            pod install --repo-update || true
+            cd ..
+            bundle exec pod install --repo-update
+          else
+            echo "No Podfile found; skipping pods"
           fi
 
-      - name: Setup signing
+      - name: Prepare App Store Connect API key file
+        working-directory: ios
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          mkdir -p fastlane/keys
+          echo "$APP_STORE_CONNECT_API_KEY" > fastlane/keys/AuthKey.p8
+          ls -la fastlane/keys
+
+      - name: Setup signing (match)
+        working-directory: ios
         env:
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-        working-directory: ios
         run: |
-          bundle install
           bundle exec fastlane match appstore --readonly
 
       - name: Build & Upload to TestFlight
+        working-directory: ios
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-        working-directory: ios
-        run: bundle exec fastlane build
+        run: |
+          # If your repo has a lane testflight, you can switch to:
+          # bundle exec fastlane testflight
+          bundle exec fastlane build
