@@ -5,6 +5,10 @@ export interface Interpretation {
   contextItems: { text: string; status: 'favorable' | 'attention' | 'limiting' }[];
   cognitiveWindow: string;
   systemReading: string;
+  whyScore: string;
+  dayRisk: string;
+  limitingFactorText: string;
+  systemReadingType: 'insight' | 'warning' | 'positive';
   todayMeans: string[];
   systemDiagnosis: string;
   pillarDescriptions: Record<string, string>;
@@ -56,7 +60,7 @@ function getWhyScore(score: number): string {
 }
 
 function getLimitingFactorText(pillar: string, value: number): string {
-  const name = pillarNames[pillar].toLowerCase();
+  const name = pillarNames[pillar]?.toLowerCase() || pillar;
   if (value >= 4) return `O fator limitante é ${name}, mas está em nível adequado.`;
   if (value >= 3) return `O fator limitante é ${name}, com margem para oscilação.`;
   return `O fator limitante é ${name}, impactando diretamente o desempenho.`;
@@ -67,6 +71,31 @@ function getDayRisk(pillars: PillarScore, score: number): string {
   if (pillars.energia < 2.5) return 'Risco de fadiga antes do final do dia.';
   if (score < 50) return 'Dia requer gestão cuidadosa de energia.';
   return 'Sem riscos significativos detectados.';
+}
+
+function getSystemReadingType(score: number): 'insight' | 'warning' | 'positive' {
+  if (score >= 70) return 'positive';
+  if (score >= 50) return 'insight';
+  return 'warning';
+}
+
+function getRichLabel(score: number, pillars: PillarScore): string {
+  const dominant = pillars.energia >= pillars.clareza && pillars.energia >= pillars.estabilidade
+    ? 'energia' : pillars.clareza >= pillars.estabilidade ? 'clareza' : 'estabilidade';
+
+  if (score >= 85) {
+    return dominant === 'energia' ? 'Energia plena' : dominant === 'clareza' ? 'Foco sustentado' : 'Equilíbrio elevado';
+  }
+  if (score >= 70) {
+    return dominant === 'energia' ? 'Energia estável' : dominant === 'clareza' ? 'Clareza disponível' : 'Sustentação adequada';
+  }
+  if (score >= 55) {
+    return dominant === 'energia' ? 'Energia moderada' : dominant === 'clareza' ? 'Foco instável' : 'Clareza parcial';
+  }
+  if (score >= 45) {
+    return dominant === 'energia' ? 'Reserva baixa' : dominant === 'clareza' ? 'Oscilação detectada' : 'Sustentação necessária';
+  }
+  return dominant === 'energia' ? 'Esgotamento energético' : dominant === 'clareza' ? 'Instabilidade elevada' : 'Recuperação necessária';
 }
 
 export function interpret(state: VYRState): Interpretation {
@@ -93,11 +122,12 @@ export function interpret(state: VYRState): Interpretation {
   const windowPhase = phase === 'BOOT' ? ' pela manhã' : phase === 'HOLD' ? ' no início da tarde' : '';
   const cognitiveWindow = windowText + windowPhase;
 
-  // System reading
+  // Separated system reading fields
   const whyScore = getWhyScore(score);
-  const limitingText = getLimitingFactorText(limitingFactor, pillars[limitingFactor as keyof PillarScore]);
+  const limitingFactorText = getLimitingFactorText(limitingFactor, pillars[limitingFactor as keyof PillarScore]);
   const dayRisk = getDayRisk(pillars, score);
-  const systemReading = `${whyScore} ${limitingText} ${dayRisk}`;
+  const systemReadingType = getSystemReadingType(score);
+  const systemReading = `${whyScore} ${limitingFactorText} ${dayRisk}`;
 
   // Today means
   let todayMeans: string[];
@@ -123,9 +153,8 @@ export function interpret(state: VYRState): Interpretation {
     ];
   }
 
-  // Rich label
-  const stateLabel = state.score === 0 ? 'Sem dados' :
-    import('./vyr-engine').then ? getRichLabelSync(score, pillars) : 'Calculando...';
+  // Rich label (sync call — bug fix from line 128)
+  const stateLabel = score === 0 ? 'Sem dados' : getRichLabel(score, pillars);
 
   // Pillar descriptions
   const pillarDescriptions: Record<string, string> = {
@@ -135,7 +164,7 @@ export function interpret(state: VYRState): Interpretation {
   };
 
   // System diagnosis
-  const systemDiagnosis = `Score ${score}/100 indica ${getWhyScore(score).toLowerCase()} ${limitingText} Recomendação: ${
+  const systemDiagnosis = `Score ${score}/100 indica ${getWhyScore(score).toLowerCase()} ${limitingFactorText} Recomendação: ${
     score >= 70 ? 'aproveite a janela disponível para trabalho de alto valor.' :
     score >= 55 ? 'mantenha ritmo controlado, evitando picos de exigência.' :
     'priorize recuperação e tarefas de baixa demanda cognitiva.'
@@ -146,27 +175,12 @@ export function interpret(state: VYRState): Interpretation {
     contextItems,
     cognitiveWindow,
     systemReading,
+    whyScore,
+    dayRisk,
+    limitingFactorText,
+    systemReadingType,
     todayMeans,
     systemDiagnosis,
     pillarDescriptions,
   };
-}
-
-function getRichLabelSync(score: number, pillars: PillarScore): string {
-  const dominant = pillars.energia >= pillars.clareza && pillars.energia >= pillars.estabilidade
-    ? 'energia' : pillars.clareza >= pillars.estabilidade ? 'clareza' : 'estabilidade';
-
-  if (score >= 85) {
-    return dominant === 'energia' ? 'Energia plena' : dominant === 'clareza' ? 'Foco sustentado' : 'Equilíbrio elevado';
-  }
-  if (score >= 70) {
-    return dominant === 'energia' ? 'Energia estável' : dominant === 'clareza' ? 'Clareza disponível' : 'Sustentação adequada';
-  }
-  if (score >= 55) {
-    return dominant === 'energia' ? 'Energia moderada' : dominant === 'clareza' ? 'Foco instável' : 'Clareza parcial';
-  }
-  if (score >= 45) {
-    return dominant === 'energia' ? 'Reserva baixa' : dominant === 'clareza' ? 'Oscilação detectada' : 'Sustentação necessária';
-  }
-  return dominant === 'energia' ? 'Esgotamento energético' : dominant === 'clareza' ? 'Instabilidade elevada' : 'Recuperação necessária';
 }

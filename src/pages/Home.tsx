@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, Minus, ChevronRight, Play, Activity } from 'lucide-react';
 import StateRing from '@/components/StateRing';
@@ -8,24 +8,13 @@ import InsightCard from '@/components/InsightCard';
 import CognitiveWindowCard from '@/components/CognitiveWindowCard';
 import TransitionCard from '@/components/TransitionCard';
 import SachetConfirmation from '@/components/SachetConfirmation';
+import CheckpointModal from '@/components/CheckpointModal';
 import NotificationBell from '@/components/NotificationBell';
 import ConnectionStatusPill from '@/components/ConnectionStatusPill';
 import BottomNav from '@/components/BottomNav';
 import BrainLogo from '@/components/BrainLogo';
-import { getCurrentPhase } from '@/lib/vyr-engine';
-import type { VYRState } from '@/lib/vyr-engine';
 import { interpret } from '@/lib/vyr-interpreter';
-import { retryOnAuthErrorLabeled, requireValidUserId } from '@/lib/auth-session';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-
-const emptyState: VYRState = {
-  score: 0,
-  level: 'Crítico',
-  pillars: { energia: 0, clareza: 0, estabilidade: 0 },
-  limitingFactor: 'energia',
-  phase: getCurrentPhase(),
-};
+import { useVYRStore } from '@/hooks/useVYRStore';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -35,127 +24,41 @@ function getGreeting(): string {
 }
 
 const phaseConfig = {
-  BOOT: { label: 'BOOT', time: '05h–11h', colorVar: '--vyr-accent-action', desc: 'Ativação cognitiva', actionLabel: 'Clique ao tomar BOOT' },
-  HOLD: { label: 'HOLD', time: '11h–17h', colorVar: '--vyr-accent-transition', desc: 'Sustentação cognitiva', actionLabel: 'Clique ao tomar HOLD' },
-  CLEAR: { label: 'CLEAR', time: '17h–22h+', colorVar: '--vyr-accent-stable', desc: 'Recuperação cognitiva', actionLabel: 'Clique ao tomar CLEAR' },
+  BOOT: { label: 'BOOT', colorVar: '--vyr-accent-action', color: '#556B8A', desc: 'Ativação cognitiva', actionLabel: 'Clique ao tomar BOOT' },
+  HOLD: { label: 'HOLD', colorVar: '--vyr-accent-transition', color: '#8F7A4A', desc: 'Sustentação cognitiva', actionLabel: 'Clique ao tomar HOLD' },
+  CLEAR: { label: 'CLEAR', colorVar: '--vyr-accent-stable', color: '#4F6F64', desc: 'Recuperação cognitiva', actionLabel: 'Clique ao tomar CLEAR' },
 };
 
 const Home = () => {
-  const { session } = useAuth();
   const navigate = useNavigate();
-  const [state, setState] = useState<VYRState>(emptyState);
-  const [hasData, setHasData] = useState(false);
-  const [delta, setDelta] = useState(0);
-  const [userName, setUserName] = useState('');
-  const [actionsTaken, setActionsTaken] = useState<string[]>([]);
-  const [showSachet, setShowSachet] = useState(false);
-  const [sachetPhase, setSachetPhase] = useState('BOOT');
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    const userId = session.user.id;
-    const today = new Date().toISOString().split('T')[0];
-
-    const loadData = async () => {
-      // Load state, name, and actions in parallel
-      const [stateRes, nameRes, actionsRes, yesterdayRes] = await Promise.all([
-        supabase.from('computed_states').select('score, level, pillars, phase').eq('user_id', userId).eq('day', today).maybeSingle(),
-        supabase.from('participantes').select('nome_publico').eq('user_id', userId).maybeSingle(),
-        supabase.from('action_logs').select('action_type').eq('user_id', userId).eq('day', today),
-        supabase.from('computed_states').select('score').eq('user_id', userId).eq('day', new Date(Date.now() - 86400000).toISOString().split('T')[0]).maybeSingle(),
-      ]);
-
-      // Name
-      if (nameRes.data?.nome_publico) {
-        setUserName(nameRes.data.nome_publico.split(' ')[0]);
-      }
-
-      // Actions taken today
-      if (actionsRes.data) {
-        setActionsTaken(actionsRes.data.map((a) => a.action_type));
-      }
-
-      // State
-      if (stateRes.data?.score != null) {
-        const p = stateRes.data.pillars as any;
-        const pillars = {
-          energia: p?.energia ?? 0,
-          clareza: p?.clareza ?? 0,
-          estabilidade: p?.estabilidade ?? 0,
-        };
-        const min = Math.min(pillars.energia, pillars.clareza, pillars.estabilidade);
-        const limitingFactor = pillars.energia === min ? 'energia' : pillars.clareza === min ? 'clareza' : 'estabilidade';
-
-        setState({
-          score: stateRes.data.score,
-          level: stateRes.data.level || 'Crítico',
-          pillars,
-          limitingFactor,
-          phase: (stateRes.data.phase as VYRState['phase']) || getCurrentPhase(),
-        });
-        setHasData(true);
-
-        if (yesterdayRes.data?.score != null) {
-          setDelta(stateRes.data.score - yesterdayRes.data.score);
-        }
-      }
-    };
-
-    loadData();
-  }, [session?.user?.id]);
+  const store = useVYRStore();
+  const { state, hasData, userName, actionsTaken, sachetConfirmation } = store;
+  const [showCheckpoint, setShowCheckpoint] = useState(false);
 
   const interpretation = useMemo(() => interpret(state), [state]);
   const phase = phaseConfig[state.phase];
 
+  // Delta (today vs yesterday)
+  const delta = useMemo(() => {
+    if (store.historyByDay.length < 2) return 0;
+    const today = new Date().toISOString().split('T')[0];
+    const todayEntry = store.historyByDay.find((h) => h.day === today);
+    const yesterdayEntry = store.historyByDay.find((h) => h.day !== today);
+    if (todayEntry && yesterdayEntry) return todayEntry.score - yesterdayEntry.score;
+    return 0;
+  }, [store.historyByDay]);
+
   const handleConfirmSachet = useCallback(async () => {
     try {
-      const userId = await requireValidUserId();
-      const today = new Date().toISOString().split('T')[0];
-
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('action_logs').insert({
-          user_id: userId,
-          day: today,
-          action_type: state.phase,
-          payload: { confirmed_at: new Date().toISOString() },
-        }).select();
-        return result;
-      });
-
-      setSachetPhase(state.phase);
-      setShowSachet(true);
-      setActionsTaken((prev) => [...prev, state.phase]);
+      await store.logAction(state.phase);
     } catch (err) {
       console.error('[home] Failed to log action:', err);
     }
-  }, [state.phase]);
-
-  const handleStartTransition = useCallback(async (targetPhase: string) => {
-    try {
-      const userId = await requireValidUserId();
-      const today = new Date().toISOString().split('T')[0];
-
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('action_logs').insert({
-          user_id: userId,
-          day: today,
-          action_type: targetPhase,
-          payload: { transition: true, confirmed_at: new Date().toISOString() },
-        }).select();
-        return result;
-      });
-
-      setSachetPhase(targetPhase);
-      setShowSachet(true);
-      setActionsTaken((prev) => [...prev, targetPhase]);
-    } catch (err) {
-      console.error('[home] Failed to log transition:', err);
-    }
-  }, []);
+  }, [state.phase, store]);
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
-      {/* Header */}
+      {/* 1. Header */}
       <header className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-2.5">
           <BrainLogo size={32} />
@@ -169,7 +72,7 @@ const Home = () => {
         </div>
       </header>
 
-      {/* State Ring */}
+      {/* 2. StateRing */}
       <div className="flex flex-col items-center pt-2" style={{ animation: 'fade-in 150ms ease-out' }}>
         <div onClick={() => hasData && navigate('/state')} className={hasData ? 'cursor-pointer' : ''}>
           <StateRing
@@ -179,7 +82,7 @@ const Home = () => {
           />
         </div>
 
-        {/* Delta */}
+        {/* 3. ScoreDelta */}
         {hasData && (
           <div className="flex items-center gap-1 mt-3 animate-delta-pulse">
             {delta > 0 ? (
@@ -195,7 +98,7 @@ const Home = () => {
           </div>
         )}
 
-        {/* Pillar Rings */}
+        {/* 4. PillarRings */}
         {hasData && (
           <div className="flex items-center justify-center gap-8 mt-6">
             <PillarRing value={state.pillars.energia} label="Energia" colorVar="--vyr-energia" index={0} />
@@ -205,12 +108,9 @@ const Home = () => {
         )}
       </div>
 
-      {/* Content */}
       <div className="px-5 mt-6 space-y-4">
         {!hasData ? (
-          /* Empty state */
           <>
-            {/* Pillar cards (empty) */}
             {['Energia', 'Clareza', 'Estabilidade'].map((label) => (
               <div key={label} className="rounded-2xl bg-card border border-border p-4 flex items-center gap-4">
                 <span className="text-lg font-mono font-bold text-foreground w-8 text-center">0</span>
@@ -221,8 +121,6 @@ const Home = () => {
                 <span className="text-xs font-mono text-muted-foreground">0/5</span>
               </div>
             ))}
-
-            {/* Diagnostic */}
             <div className="rounded-2xl bg-card border border-border p-4">
               <div className="flex items-start gap-3">
                 <Activity size={20} className="text-primary mt-0.5 flex-shrink-0" />
@@ -237,15 +135,69 @@ const Home = () => {
             </div>
           </>
         ) : (
-          /* Full state */
           <>
-            {/* Action Button */}
+            {/* 5. ContextCard */}
+            <ContextCard items={interpretation.contextItems} />
+
+            {/* 6. CognitiveWindowCard */}
+            <CognitiveWindowCard
+              score={state.score}
+              clareza={state.pillars.clareza}
+              estabilidade={state.pillars.estabilidade}
+            />
+
+            {/* 7. InsightCard - Leitura do sistema */}
+            <InsightCard
+              type={interpretation.systemReadingType}
+              title="Leitura do sistema"
+              description={interpretation.whyScore}
+              detail={interpretation.dayRisk}
+              muted={interpretation.limitingFactorText}
+            />
+
+            {/* 8. Hoje isso significa */}
+            <button
+              onClick={() => navigate('/state')}
+              className="w-full rounded-2xl bg-card p-4 text-left transition-transform active:scale-[0.98]"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-xs uppercase tracking-[0.15em] text-vyr-text-muted font-medium">
+                  Hoje isso significa
+                </h3>
+                <ChevronRight size={16} className="text-vyr-text-muted" />
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-2">O que o sistema projeta para o seu dia.</p>
+              <div className="space-y-2">
+                {interpretation.todayMeans.map((item, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'hsl(var(--vyr-accent-action))' }} />
+                    <span className="text-sm text-secondary-foreground">{item}</span>
+                  </div>
+                ))}
+              </div>
+            </button>
+
+            {/* 9. TransitionCard */}
+            <TransitionCard
+              state={state}
+              actionsTaken={actionsTaken}
+              onStartTransition={store.activateTransition}
+            />
+
+            {/* 10. Ação Principal */}
+            <div className="rounded-2xl bg-card border border-border p-4">
+              <h3 className="text-xs uppercase tracking-[0.15em] text-muted-foreground font-medium mb-1">
+                Protocolo {phase.label}
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">{phase.desc}. Registre quando tomar o sachet desta fase.</p>
+            </div>
+
             <button
               onClick={handleConfirmSachet}
               className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm font-medium text-foreground transition-transform active:scale-[0.98]"
               style={{
-                background: `hsl(var(${phase.colorVar}))`,
-                boxShadow: `0 4px 20px -4px hsl(var(${phase.colorVar}) / 0.4)`,
+                background: phase.color,
+                boxShadow: `0 4px 20px -4px ${phase.color}66`,
               }}
             >
               <div className="flex items-center gap-2">
@@ -257,72 +209,29 @@ const Home = () => {
             <p className="text-[10px] text-muted-foreground text-center -mt-2">
               Registre aqui quando tomar o sachet da fase {phase.label}.
             </p>
-
-            {/* Context Card */}
-            <ContextCard items={interpretation.contextItems} />
-
-            {/* Cognitive Window */}
-            <CognitiveWindowCard
-              score={state.score}
-              clareza={state.pillars.clareza}
-              estabilidade={state.pillars.estabilidade}
-            />
-
-            {/* Insight: System Reading */}
-            <InsightCard type="insight" title="Leitura do sistema" description={interpretation.systemReading} />
-
-            {/* Today Means (clickable) */}
-            <button
-              onClick={() => navigate('/state')}
-              className="w-full rounded-2xl bg-card p-4 text-left transition-transform active:scale-[0.98]"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs uppercase tracking-[0.15em] text-vyr-text-muted font-medium">
-                  Hoje isso significa
-                </h3>
-                <ChevronRight size={16} className="text-vyr-text-muted" />
-              </div>
-              <div className="space-y-2">
-                {interpretation.todayMeans.map((item, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0" style={{ background: 'hsl(var(--vyr-accent-action))' }} />
-                    <span className="text-sm text-secondary-foreground">{item}</span>
-                  </div>
-                ))}
-              </div>
-            </button>
-
-            {/* Transition Card */}
-            <TransitionCard
-              state={state}
-              actionsTaken={actionsTaken}
-              onStartTransition={handleStartTransition}
-            />
-
-            {/* Recommendations */}
-            {interpretation.todayMeans.map((item, i) => (
-              <InsightCard
-                key={i}
-                type={i === 0 ? 'positive' : 'warning'}
-                title={i === 0 ? 'Capacidade do dia' : 'Recomendação'}
-                description={item}
-              />
-            ))}
           </>
         )}
       </div>
 
       <BottomNav />
 
-      {/* Sachet Confirmation Modal */}
-      {showSachet && (
+      {/* 11. SachetConfirmation */}
+      {sachetConfirmation.show && (
         <SachetConfirmation
-          phase={sachetPhase}
-          onDismiss={() => setShowSachet(false)}
+          phase={sachetConfirmation.phase}
+          onDismiss={store.dismissConfirmation}
           onAddObservation={() => {
-            setShowSachet(false);
-            navigate('/labs?tab=Percepções');
+            store.dismissConfirmation();
+            setShowCheckpoint(true);
           }}
+        />
+      )}
+
+      {/* Checkpoint Modal */}
+      {showCheckpoint && (
+        <CheckpointModal
+          onClose={() => setShowCheckpoint(false)}
+          onSubmit={store.addCheckpoint}
         />
       )}
     </div>

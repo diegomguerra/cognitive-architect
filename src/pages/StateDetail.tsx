@@ -1,56 +1,23 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StateRing from '@/components/StateRing';
 import PillarRing from '@/components/PillarRing';
 import InsightCard from '@/components/InsightCard';
 import BottomNav from '@/components/BottomNav';
-import { getCurrentPhase } from '@/lib/vyr-engine';
-import type { VYRState } from '@/lib/vyr-engine';
 import { interpret } from '@/lib/vyr-interpreter';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { useVYRStore } from '@/hooks/useVYRStore';
 
-const emptyState: VYRState = {
-  score: 0, level: 'Crítico',
-  pillars: { energia: 0, clareza: 0, estabilidade: 0 },
-  limitingFactor: 'energia', phase: getCurrentPhase(),
-};
+const pillarData = [
+  { key: 'energia', label: 'Energia', colorVar: '--vyr-energia' },
+  { key: 'clareza', label: 'Clareza', colorVar: '--vyr-clareza' },
+  { key: 'estabilidade', label: 'Estabilidade', colorVar: '--vyr-estabilidade' },
+];
 
 const StateDetail = () => {
   const navigate = useNavigate();
-  const { session } = useAuth();
-  const [state, setState] = useState<VYRState>(emptyState);
-  const [hasData, setHasData] = useState(false);
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    const today = new Date().toISOString().split('T')[0];
-
-    supabase.from('computed_states').select('score, level, pillars, phase')
-      .eq('user_id', session.user.id).eq('day', today).maybeSingle()
-      .then(({ data }) => {
-        if (data?.score != null) {
-          const p = data.pillars as any;
-          const pillars = { energia: p?.energia ?? 0, clareza: p?.clareza ?? 0, estabilidade: p?.estabilidade ?? 0 };
-          const min = Math.min(pillars.energia, pillars.clareza, pillars.estabilidade);
-          setState({
-            score: data.score, level: data.level || 'Crítico', pillars,
-            limitingFactor: pillars.energia === min ? 'energia' : pillars.clareza === min ? 'clareza' : 'estabilidade',
-            phase: (data.phase as VYRState['phase']) || getCurrentPhase(),
-          });
-          setHasData(true);
-        }
-      });
-  }, [session?.user?.id]);
-
+  const { state, hasData } = useVYRStore();
   const interpretation = useMemo(() => interpret(state), [state]);
-
-  const pillarData = [
-    { key: 'energia', label: 'Energia', colorVar: '--vyr-energia' },
-    { key: 'clareza', label: 'Clareza', colorVar: '--vyr-clareza' },
-    { key: 'estabilidade', label: 'Estabilidade', colorVar: '--vyr-estabilidade' },
-  ];
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
