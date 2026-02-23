@@ -1,4 +1,5 @@
-// VYR State Engine — Core Algorithm
+// VYR State Engine — Core Algorithm v2
+// Implements z-score baseline, dynamic weights, rich labels
 
 export interface BiometricData {
   rhr?: number;           // Resting Heart Rate (bpm)
@@ -7,9 +8,11 @@ export interface BiometricData {
   spo2?: number;          // 90-100
   sleepRegularity?: number; // deviation in minutes
   awakenings?: number;    // count
-  hrvIndex?: number;      // ms (SDNN)
+  hrvIndex?: number;      // 0-100 (already normalized)
+  hrvRawMs?: number;      // ms (SDNN) — raw, will be normalized
   stressLevel?: number;   // 0-100
   tempDeviation?: number; // °C deviation from baseline
+  activityLevel?: 'high' | 'moderate' | 'low' | null;
 }
 
 export interface PillarScore {
@@ -26,49 +29,145 @@ export interface VYRState {
   phase: 'BOOT' | 'HOLD' | 'CLEAR';
 }
 
+export interface BaselineValues {
+  rhr?: { mean: number; std: number };
+  hrv?: { mean: number; std: number };
+  sleepDuration?: { mean: number; std: number };
+  sleepQuality?: { mean: number; std: number };
+  spo2?: { mean: number; std: number };
+}
+
+// Population fallback baseline
+export const FALLBACK_BASELINE: Required<BaselineValues> = {
+  rhr: { mean: 63, std: 5 },
+  hrv: { mean: 55, std: 12 },
+  sleepDuration: { mean: 7.0, std: 0.7 },
+  sleepQuality: { mean: 60, std: 15 },
+  spo2: { mean: 97, std: 1.5 },
+};
+
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-const normalize = (v: number, min: number, max: number) => clamp((v - min) / (max - min), 0, 1) * 5;
-const invertNormalize = (v: number, min: number, max: number) => clamp(1 - (v - min) / (max - min), 0, 1) * 5;
 
-export function computePillars(data: BiometricData): PillarScore {
-  // Energia: RHR(inv), sleep duration, sleep quality, SpO2
-  const energiaComponents: number[] = [];
-  const energiaWeights: number[] = [];
-  
-  if (data.rhr != null) { energiaComponents.push(invertNormalize(data.rhr, 40, 100)); energiaWeights.push(2.5); }
-  if (data.sleepDuration != null) { energiaComponents.push(normalize(data.sleepDuration, 4, 9)); energiaWeights.push(2.5); }
-  if (data.sleepQuality != null) { energiaComponents.push(normalize(data.sleepQuality, 0, 100)); energiaWeights.push(2.5); }
-  if (data.spo2 != null) { energiaComponents.push(normalize(data.spo2, 90, 100)); energiaWeights.push(2.5); }
+/**
+ * Normalize raw HRV ms to 0-100 index (logarithmic)
+ */
+export function normalizeHRV(ms: number): number {
+  const clamped = clamp(ms, 5, 200);
+  return (Math.log(clamped) - Math.log(5)) / (Math.log(200) - Math.log(5)) * 100;
+}
 
-  // Clareza: sleep regularity(inv), sleep quality, awakenings(inv)
-  const clarezaComponents: number[] = [];
-  const clarezaWeights: number[] = [];
-  
-  if (data.sleepRegularity != null) { clarezaComponents.push(invertNormalize(data.sleepRegularity, 0, 120)); clarezaWeights.push(2.5); }
-  if (data.sleepQuality != null) { clarezaComponents.push(normalize(data.sleepQuality, 0, 100)); clarezaWeights.push(2.5); }
-  if (data.awakenings != null) { clarezaComponents.push(invertNormalize(data.awakenings, 0, 10)); clarezaWeights.push(2.5); }
-
-  // Estabilidade: HRV, stress(inv), temp deviation
-  const estabComponents: number[] = [];
-  const estabWeights: number[] = [];
-  
-  if (data.hrvIndex != null) { 
-    const hrvNorm = clamp(Math.log(data.hrvIndex + 1) / Math.log(201) * 5, 0, 5);
-    estabComponents.push(hrvNorm); estabWeights.push(2.0); 
-  }
-  if (data.stressLevel != null) { estabComponents.push(invertNormalize(data.stressLevel, 0, 100)); estabWeights.push(2.0); }
-  if (data.tempDeviation != null) { estabComponents.push(invertNormalize(Math.abs(data.tempDeviation), 0, 2)); estabWeights.push(2.0); }
-
-  const weightedAvg = (vals: number[], weights: number[]) => {
-    if (vals.length === 0) return 3; // neutral fallback
-    const totalW = weights.reduce((a, b) => a + b, 0);
-    return vals.reduce((sum, v, i) => sum + v * weights[i], 0) / totalW;
+/**
+ * Validate and clamp biometric values to physiological ranges
+ */
+export function validateWearableData(data: BiometricData): BiometricData {
+  return {
+    ...data,
+    rhr: data.rhr != null ? clamp(data.rhr, 35, 120) : undefined,
+    hrvIndex: data.hrvIndex != null ? clamp(data.hrvIndex, 0, 100) : 
+              data.hrvRawMs != null ? normalizeHRV(data.hrvRawMs) : undefined,
+    sleepDuration: data.sleepDuration != null ? clamp(data.sleepDuration, 0, 14) : undefined,
+    sleepQuality: data.sleepQuality != null ? clamp(data.sleepQuality, 0, 100) : undefined,
+    sleepRegularity: data.sleepRegularity != null ? clamp(data.sleepRegularity, -120, 120) : undefined,
+    awakenings: data.awakenings != null ? clamp(data.awakenings, 0, 30) : undefined,
+    stressLevel: data.stressLevel != null ? clamp(data.stressLevel, 0, 100) : undefined,
+    spo2: data.spo2 != null ? clamp(data.spo2, 70, 100) : undefined,
+    tempDeviation: data.tempDeviation != null ? clamp(data.tempDeviation, -4, 4) : undefined,
   };
+}
+
+/**
+ * Compute z-score clamped to [-2, +2]
+ */
+function zScore(value: number, mean: number, std: number): number {
+  if (std < 0.01) return 0;
+  return clamp((value - mean) / std, -2, 2);
+}
+
+/**
+ * Convert z-score to pillar contribution (range -1.5 to +1.5)
+ */
+function zToPillar(z: number): number {
+  return z * 0.75;
+}
+
+interface WeightedInput {
+  value: number; // pillar contribution
+  weight: number;
+}
+
+function dynamicWeightedAvg(inputs: WeightedInput[], targetWeight: number, base: number): number {
+  if (inputs.length === 0) return base;
+  const totalW = inputs.reduce((s, i) => s + i.weight, 0);
+  const scale = targetWeight / totalW;
+  const contribution = inputs.reduce((s, i) => s + i.value * i.weight * scale, 0) / targetWeight;
+  return clamp(base + contribution, 0, 5);
+}
+
+export function computePillars(data: BiometricData, baseline?: BaselineValues): PillarScore {
+  const validated = validateWearableData(data);
+  const bl = { ...FALLBACK_BASELINE, ...baseline };
+
+  // === ENERGIA (base 3.0, target weight 2.5) ===
+  const energiaInputs: WeightedInput[] = [];
+  if (validated.rhr != null && bl.rhr) {
+    // Inverted: below mean = good
+    energiaInputs.push({ value: zToPillar(-zScore(validated.rhr, bl.rhr.mean, bl.rhr.std)), weight: 1.0 });
+  }
+  if (validated.sleepDuration != null && bl.sleepDuration) {
+    energiaInputs.push({ value: zToPillar(zScore(validated.sleepDuration, bl.sleepDuration.mean, bl.sleepDuration.std)), weight: 1.0 });
+  }
+  if (validated.sleepQuality != null && bl.sleepQuality) {
+    energiaInputs.push({ value: zToPillar(zScore(validated.sleepQuality, bl.sleepQuality.mean, bl.sleepQuality.std)), weight: 0.5 });
+  }
+  if (validated.spo2 != null && bl.spo2) {
+    energiaInputs.push({ value: zToPillar(zScore(validated.spo2, bl.spo2.mean, bl.spo2.std)), weight: 0.4 });
+  }
+
+  let energia = dynamicWeightedAvg(energiaInputs, 2.5, 3.0);
+  // Activity adjustment
+  if (validated.activityLevel === 'high') energia = clamp(energia - 0.5, 0, 5);
+  else if (validated.activityLevel === 'low') energia = clamp(energia + 0.25, 0, 5);
+
+  // === CLAREZA (base 3.0, target weight 2.5) ===
+  const clarezaInputs: WeightedInput[] = [];
+  if (validated.sleepRegularity != null) {
+    // Inverted: less variation = better
+    const regZ = zScore(Math.abs(validated.sleepRegularity), 30, 20);
+    clarezaInputs.push({ value: zToPillar(-regZ), weight: 1.0 });
+  }
+  if (validated.sleepQuality != null && bl.sleepQuality) {
+    clarezaInputs.push({ value: zToPillar(zScore(validated.sleepQuality, bl.sleepQuality.mean, bl.sleepQuality.std)), weight: 1.0 });
+  }
+  if (validated.awakenings != null) {
+    // Inverted: less = better
+    const awkZ = zScore(validated.awakenings, 3, 2);
+    clarezaInputs.push({ value: zToPillar(-awkZ), weight: 0.5 });
+  }
+
+  const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 3.0);
+
+  // === ESTABILIDADE (base 3.0, target weight 2.0) ===
+  const estabInputs: WeightedInput[] = [];
+  if (validated.hrvIndex != null && bl.hrv) {
+    estabInputs.push({ value: zToPillar(zScore(validated.hrvIndex, bl.hrv.mean, bl.hrv.std)), weight: 1.3 });
+  }
+  if (validated.stressLevel != null) {
+    // Inverted: lower stress = better
+    const stressZ = zScore(validated.stressLevel, 40, 15);
+    estabInputs.push({ value: zToPillar(-stressZ), weight: 0.7 });
+  }
+  if (validated.tempDeviation != null) {
+    // Absolute deviation = instability
+    const tempZ = zScore(Math.abs(validated.tempDeviation), 0.2, 0.3);
+    estabInputs.push({ value: zToPillar(-tempZ), weight: 0.3 });
+  }
+
+  const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 3.0);
 
   return {
-    energia: clamp(weightedAvg(energiaComponents, energiaWeights), 0, 5),
-    clareza: clamp(weightedAvg(clarezaComponents, clarezaWeights), 0, 5),
-    estabilidade: clamp(weightedAvg(estabComponents, estabWeights), 0, 5),
+    energia: Math.round(energia * 100) / 100,
+    clareza: Math.round(clareza * 100) / 100,
+    estabilidade: Math.round(estabilidade * 100) / 100,
   };
 }
 
@@ -100,8 +199,63 @@ export function getCurrentPhase(): 'BOOT' | 'HOLD' | 'CLEAR' {
   return 'CLEAR';
 }
 
-export function computeState(data: BiometricData): VYRState {
-  const pillars = computePillars(data);
+/**
+ * Rich state labels based on score + dominant pillar
+ */
+export function getRichLabel(score: number, pillars: PillarScore): string {
+  const dominant = pillars.energia >= pillars.clareza && pillars.energia >= pillars.estabilidade
+    ? 'energia' : pillars.clareza >= pillars.estabilidade ? 'clareza' : 'estabilidade';
+
+  if (score >= 85) {
+    return dominant === 'energia' ? 'Energia plena' : dominant === 'clareza' ? 'Foco sustentado' : 'Equilíbrio elevado';
+  }
+  if (score >= 70) {
+    return dominant === 'energia' ? 'Energia estável' : dominant === 'clareza' ? 'Clareza disponível' : 'Sustentação adequada';
+  }
+  if (score >= 55) {
+    return dominant === 'energia' ? 'Energia moderada' : dominant === 'clareza' ? 'Foco instável' : 'Clareza parcial';
+  }
+  if (score >= 45) {
+    return dominant === 'energia' ? 'Reserva baixa' : dominant === 'clareza' ? 'Oscilação detectada' : 'Sustentação necessária';
+  }
+  return dominant === 'energia' ? 'Esgotamento energético' : dominant === 'clareza' ? 'Instabilidade elevada' : 'Recuperação necessária';
+}
+
+/**
+ * Recommended action based on context
+ */
+export function getRecommendedAction(pillars: PillarScore, score: number, actionsTaken: string[]): 'BOOT' | 'HOLD' | 'CLEAR' {
+  const hour = new Date().getHours();
+
+  // Night: always CLEAR
+  if (hour >= 22 || hour < 5) return 'CLEAR';
+
+  // Critical state: CLEAR
+  if (score < 45 || pillars.energia <= 2 || pillars.estabilidade <= 2) return 'CLEAR';
+
+  // Morning
+  if (hour >= 5 && hour < 11) {
+    if (!actionsTaken.includes('BOOT') && (pillars.energia >= 3.5 || score >= 65)) return 'BOOT';
+    if (actionsTaken.includes('BOOT')) return 'HOLD';
+  }
+
+  // Afternoon
+  if (hour >= 11 && hour < 17) {
+    if (score >= 55 && !actionsTaken.includes('HOLD')) return 'HOLD';
+    if (actionsTaken.includes('HOLD')) return 'CLEAR';
+  }
+
+  // Evening
+  if (hour >= 17) return 'CLEAR';
+
+  // Fallback
+  if (score >= 65) return 'BOOT';
+  if (score >= 55) return 'HOLD';
+  return 'CLEAR';
+}
+
+export function computeState(data: BiometricData, baseline?: BaselineValues): VYRState {
+  const pillars = computePillars(data, baseline);
   const score = computeScore(pillars);
   return {
     score,
@@ -121,7 +275,7 @@ export function getDemoState(): VYRState {
     spo2: 97,
     sleepRegularity: 25,
     awakenings: 2,
-    hrvIndex: 45,
+    hrvRawMs: 45,
     stressLevel: 35,
     tempDeviation: 0.3,
   });
