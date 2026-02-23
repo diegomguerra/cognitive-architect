@@ -18,7 +18,6 @@ const HEALTH_READ_TYPES: HealthDataType[] = [
   'respiratoryRate',
 ];
 
-// Types for sleep processing
 export interface SleepSampleProcessed {
   sleepState: string;
   startDate: string;
@@ -61,8 +60,6 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
 
 /**
  * Calculate sleep quality from sleep samples
- * Formula: quality = (% deep + REM × 2.5)
- * Excludes awake and inBed samples
  */
 export function calculateSleepQuality(samples: HealthSample[]): {
   durationHours: number;
@@ -106,12 +103,15 @@ export function convertHRVtoScale(hrvMs: number): number {
 }
 
 /**
- * Sync HealthKit data to Supabase
+ * Sync HealthKit data to Supabase with full diagnostic logging
  */
 export async function syncHealthKitData(): Promise<boolean> {
   try {
     const available = await isHealthKitAvailable();
-    if (!available) return false;
+    if (!available) {
+      console.warn('[healthkit] HealthKit not available');
+      return false;
+    }
 
     const userId = await requireValidUserId();
     const { Health } = await import('@capgo/capacitor-health');
@@ -138,28 +138,28 @@ export async function syncHealthKitData(): Promise<boolean> {
         Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
       ]);
 
-    // Process sleep
-    const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
+    console.info('[healthkit] samples read', {
+      hr: hrData.samples.length,
+      rhr: rhrData.samples.length,
+      hrv: hrvData.samples.length,
+      sleep: sleepData.samples.length,
+      steps: stepsData.samples.length,
+      spo2: spo2Data.samples.length,
+      rr: rrData.samples.length,
+    });
 
-    // Process HRV
+    // Process
+    const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
     const avgHrv = hrvData.samples.length > 0
       ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length
       : undefined;
-
-    // Process RHR
     const avgRhr = rhrData.samples.length > 0
       ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length
       : undefined;
-
-    // Process steps
     const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
-
-    // Process SpO2
     const avgSpo2 = spo2Data.samples.length > 0
       ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length
       : undefined;
-
-    // Process respiratory rate
     const avgRR = rrData.samples.length > 0
       ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length
       : undefined;
@@ -175,6 +175,14 @@ export async function syncHealthKitData(): Promise<boolean> {
       respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
     };
 
+    console.info('[healthkit] metrics computed', {
+      sampleKeys: Object.keys(metrics),
+      rhr: metrics.rhr,
+      hrv: metrics.hrv_sdnn,
+      sleep: metrics.sleep_duration_hours,
+      steps: metrics.steps,
+    });
+
     // Upsert to ring_daily_data
     const result = await retryOnAuthErrorLabeled(async () => {
       const res = await supabase
@@ -189,11 +197,10 @@ export async function syncHealthKitData(): Promise<boolean> {
           { onConflict: 'user_id,day,source_provider' }
         )
         .select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
-    });
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint } : null };
+    }, { table: 'ring_daily_data', operation: 'upsert' });
 
     if (result.error) {
-      console.error('[healthkit] Sync failed:', result.error.message);
       return false;
     }
 
@@ -211,12 +218,12 @@ export async function syncHealthKitData(): Promise<boolean> {
           { onConflict: 'user_id,provider' }
         )
         .select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
-    });
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint } : null };
+    }, { table: 'user_integrations', operation: 'upsert' });
 
     return true;
   } catch (e) {
-    console.error('[healthkit] syncHealthKitData error:', e);
+    console.error('[DB][ERR] syncHealthKitData exception:', e);
     return false;
   }
 }

@@ -71,7 +71,7 @@ const PerceptionsTab = () => {
           energy_score: values.energia, mood_score: values.estabilidade,
         }, { onConflict: 'user_id,day' }).select();
         return result;
-      });
+      }, { table: 'daily_reviews', operation: 'upsert' });
 
       await retryOnAuthErrorLabeled(async () => {
         const result = await supabase.from('action_logs').insert({
@@ -80,7 +80,7 @@ const PerceptionsTab = () => {
           payload: { values, mode, phase: mode === 'fase' ? selectedPhase : null },
         }).select();
         return result;
-      });
+      }, { table: 'action_logs', operation: 'insert' });
 
       if (mode === 'fase') {
         setSavedPhases((prev) => [...prev, selectedPhase]);
