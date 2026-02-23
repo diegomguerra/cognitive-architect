@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
 import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/lib/vyr-engine';
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
-import { isHealthKitAvailable, requestHealthKitPermissions, syncHealthKitData } from '@/lib/healthkit';
+import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
 
 export interface DayEntry {
   day: string;
@@ -205,15 +205,16 @@ export function useVYRStore() {
           user_id: uid,
           provider: 'apple_health',
           status: 'active',
-          scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation'],
+          scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
         }, { onConflict: 'user_id,provider' } as any).select();
         return result;
       }, { table: 'user_integrations', operation: 'upsert' });
+      await enableHealthKitBackgroundSync();
       setWearableConnection({
         provider: 'apple_health',
         status: 'active',
         lastSyncAt: null,
-        scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation'],
+        scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
       });
     }
     return ok;
@@ -233,7 +234,7 @@ export function useVYRStore() {
   }, []);
 
   const syncWearable = useCallback(async () => {
-    const ok = await syncHealthKitData();
+    const ok = await runIncrementalHealthSync('manual');
     if (ok) {
       setWearableConnection((prev) => prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev);
       await loadData();

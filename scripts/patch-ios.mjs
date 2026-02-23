@@ -28,13 +28,16 @@ function patchInfoPlist() {
   let plist = readFileSync(plistPath, 'utf8');
   let changed = false;
 
-  // NSHealthShareUsageDescription
+  const healthDescriptions = `
+	<key>NSHealthShareUsageDescription</key>
+	<string>VYR Labs reads your heart rate, resting heart rate, heart rate variability (HRV), sleep analysis, step count, blood oxygen saturation (SpO2), and respiratory rate to calculate your daily cognitive performance score and provide personalized insights.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>VYR Labs writes summary records for steps, body temperature, sleep, heart rate, HRV, blood pressure, VO2Max, SpO2, and active energy burned to Apple Health when permitted.</string>`;
+
   if (!plist.includes('NSHealthShareUsageDescription')) {
-    const desc = `\t<key>NSHealthShareUsageDescription</key>
-\t<string>VYR Labs reads your heart rate, resting heart rate, HRV (SDNN), sleep analysis, step count, SpO2, respiratory rate, body temperature, blood pressure, VO2 max, and active energy to calculate your daily cognitive performance score. Data is processed on-device and stored securely. Revoke access anytime in Settings › Privacy › Health.</string>`;
-    plist = plist.replace(/<\/dict>\s*<\/plist>/, `${desc}\n</dict>\n</plist>`);
-    changed = true;
-    console.log('✅ Added NSHealthShareUsageDescription');
+    plist = plist.replace(/<\/dict>\s*<\/plist>/, `${healthDescriptions}\n</dict>\n</plist>`);
+    writeFileSync(plistPath, plist);
+    console.log('✅ Info.plist patched with HealthKit usage descriptions');
   } else {
     console.log('ℹ️  NSHealthShareUsageDescription already present');
   }
@@ -53,41 +56,22 @@ function patchInfoPlist() {
   if (changed) writeFileSync(plistPath, plist);
 }
 
-// ── 2. Merge entitlements (never overwrite, never add health-records) ──
+function ensureEntitlementKey(xml, key, valueXml) {
+  if (xml.includes(`<key>${key}</key>`)) {
+    const pattern = new RegExp(`<key>${key}<\\/key>\\s*(<true\\/>|<false\\/>|<array>[\\s\\S]*?<\\/array>)`, 'm');
+    return xml.replace(pattern, `<key>${key}</key>\n\t${valueXml}`);
+  }
+
+  return xml.replace('</dict>', `\t<key>${key}</key>\n\t${valueXml}\n</dict>`);
+}
+
+// 2. Create/patch App.entitlements
 function patchEntitlements() {
   const entPath = join(IOS_DIR, 'App.entitlements');
-  let existing = existsSync(entPath) ? readFileSync(entPath, 'utf8') : '';
-
-  const needsHealthkit = !existing.includes('com.apple.developer.healthkit');
-  const needsBgDelivery = !existing.includes('com.apple.developer.healthkit.background-delivery');
-  const hasHealthRecords = existing.includes('health-records');
-
-  if (!needsHealthkit && !needsBgDelivery && !hasHealthRecords) {
-    console.log('ℹ️  Entitlements already correct');
-    return;
-  }
-
-  // Remove health-records if present (not needed, risks App Review rejection)
-  if (hasHealthRecords) {
-    existing = existing.replace(/<string>health-records<\/string>\s*/g, '');
-    // Clean up empty access array if it was the only entry
-    existing = existing.replace(
-      /<key>com\.apple\.developer\.healthkit\.access<\/key>\s*<array>\s*<\/array>/g,
-      ''
-    );
-    console.log('✅ Removed health-records from entitlements');
-  }
-
-  // If file doesn't exist or is empty, create from scratch
-  if (!existing.includes('<dict>')) {
-    existing = `<?xml version="1.0" encoding="UTF-8"?>
+  const defaultXml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-\t<key>com.apple.developer.healthkit</key>
-\t<true/>
-\t<key>com.apple.developer.healthkit.background-delivery</key>
-\t<true/>
 </dict>
 </plist>`;
   } else {
@@ -104,8 +88,16 @@ function patchEntitlements() {
     }
   }
 
-  writeFileSync(entPath, existing);
-  console.log('✅ Entitlements patched (merge-safe)');
+  let xml = existsSync(entPath) ? readFileSync(entPath, 'utf8') : defaultXml;
+
+  xml = ensureEntitlementKey(xml, 'com.apple.developer.healthkit', '<true/>');
+  xml = ensureEntitlementKey(xml, 'com.apple.developer.healthkit.background-delivery', '<true/>');
+
+  xml = xml.replace(/\s*<key>com\.apple\.developer\.healthkit\.access<\/key>\s*<array>[\s\S]*?<\/array>/g, '');
+  xml = xml.replace(/\s*<string>health-records<\/string>\s*/g, '');
+
+  writeFileSync(entPath, xml);
+  console.log('✅ App.entitlements merged (idempotent), no health-records added');
 }
 
 // ── 3. Patch project.pbxproj ───────────────────────────────────────
@@ -119,24 +111,21 @@ function patchPbxproj() {
   let changed = false;
 
   if (!pbx.includes('com.apple.HealthKit')) {
-    if (pbx.includes('SystemCapabilities')) {
+    if (pbx.includes('SystemCapabilities = {')) {
       pbx = pbx.replace(
         /SystemCapabilities = \{/,
-        `SystemCapabilities = {\n\t\t\t\tcom.apple.HealthKit = {\n\t\t\t\t\tenabled = 1;\n\t\t\t\t};`
+        `SystemCapabilities = {\n\t\t\t\tcom.apple.HealthKit = {\n\t\t\t\t\tenabled = 1;\n\t\t\t\t};`,
       );
-      changed = true;
+      writeFileSync(PBXPROJ, pbx);
+      console.log('✅ project.pbxproj patched with HealthKit capability');
     }
+  } else {
+    console.log('ℹ️  project.pbxproj already has HealthKit capability');
   }
 
-  if (!pbx.includes('App.entitlements') && pbx.includes('CODE_SIGN_ENTITLEMENTS = ""')) {
-    pbx = pbx.replace(
-      /CODE_SIGN_ENTITLEMENTS = ""/g,
-      'CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"'
-    );
-    changed = true;
-  }
-
-  if (changed) {
+  if (!pbx.includes('CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"')) {
+    pbx = readFileSync(PBXPROJ, 'utf8');
+    pbx = pbx.replace(/CODE_SIGN_ENTITLEMENTS = ""/g, 'CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"');
     writeFileSync(PBXPROJ, pbx);
     console.log('✅ project.pbxproj patched');
   } else {
@@ -144,8 +133,7 @@ function patchPbxproj() {
   }
 }
 
-// Run
-console.log('🔧 Patching iOS project for HealthKit (merge-safe)…\n');
+console.log('🔧 Patching iOS project for HealthKit...\n');
 patchInfoPlist();
 patchEntitlements();
 patchPbxproj();

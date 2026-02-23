@@ -46,8 +46,8 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>VYR Labs reads your heart rate, resting heart rate, HRV (SDNN), sleep analysis, step count, SpO2, respiratory rate, body temperature, blood pressure, VO2 max, and active energy to calculate your daily cognitive performance score and provide personalized insights. Data is processed on-device and stored securely in your private account. Revoke access anytime in Settings › Privacy › Health.</string>
+	<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, resting heart rate, and respiratory rate to compute your daily cognitive insights.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>VYR Labs writes steps, heart rate, HRV, sleep analysis, SpO2, body temperature, blood pressure, VO2 max, and active energy back to Apple Health so you can view cognitive wellness trends alongside your other health data. No raw biometric data is modified. Disable write access anytime in Settings › Privacy › Health.</string>
+	<string>VYR Labs writes samples for steps, body temperature, sleep, heart rate, HRV (SDNN), blood pressure (systolic + diastolic), VO2 Max, SpO2, and active energy burned to Apple Health when you grant permission. Stress is never written to Apple Health.</string>
 </dict>
 </plist>

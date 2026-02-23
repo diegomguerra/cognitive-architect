@@ -1,54 +1,51 @@
 /**
  * HealthKit integration via @capgo/capacitor-health (Capacitor 8)
- * Handles read+write for types supported by the plugin.
- * Types NOT supported by plugin (bodyTemperature, bloodPressure, vo2Max, activeEnergy)
- * are handled by the native VYRHealthBridge — see healthkit-bridge.ts.
- *
- * "Stress" is a DERIVED metric — never written to HealthKit.
  */
 
 import { forceRefreshSession, requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
+import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 
-// ── Types ────────────────────────────────────────────────────────────
-
 export const HEALTH_READ_TYPES: HealthDataType[] = [
-  'heartRate',
-  'restingHeartRate',
-  'heartRateVariability',
-  'sleep',
-  'steps',
-  'oxygenSaturation',
-  'respiratoryRate',
+  'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation',
+  'respiratoryRate', 'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
 ];
-
 export const HEALTH_WRITE_TYPES: HealthDataType[] = [
-  'steps',
-  'heartRate',
-  'restingHeartRate',
-  'heartRateVariability',
-  'sleep',
-  'oxygenSaturation',
-  'respiratoryRate',
+  'steps', 'bodyTemperature', 'sleep', 'heartRate', 'heartRateVariability',
+  'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'oxygenSaturation', 'activeEnergyBurned',
 ];
+const BACKGROUND_TYPES = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
 
-export interface SleepSampleProcessed {
-  sleepState: string;
-  startDate: string;
-  endDate: string;
-  value: number;
+const ANCHOR_PREFIX = 'healthkit.anchor.';
+const SYNC_DEBOUNCE_MS = 1500;
+let syncLock = false;
+let syncDebounce: ReturnType<typeof setTimeout> | null = null;
+let observerListenerBound = false;
+
+export type HealthAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sharingAuthorized' | 'unknown';
+
+async function getAuthorizationStatuses(types: HealthDataType[]): Promise<Record<string, HealthAuthorizationStatus>> {
+  try {
+    const { Health } = await import('@capgo/capacitor-health');
+    const checker = (Health as any).checkAuthorization;
+    if (typeof checker === 'function') {
+      const result = await checker({ types });
+      const statuses = result?.statuses ?? {};
+      return Object.fromEntries(types.map((type) => [type, statuses[type] ?? 'unknown']));
+    }
+  } catch {
+    // fallback below
+  }
+
+  try {
+    const result = await VYRHealthBridge.getAuthorizationStatuses({ types });
+    return Object.fromEntries(types.map((type) => [type, result.statuses[type] ?? 'unknown']));
+  } catch {
+    return Object.fromEntries(types.map((type) => [type, 'unknown']));
+  }
 }
-
-export interface AuthorizationStatusResult {
-  readAuthorized: string[];
-  readDenied: string[];
-  writeAuthorized: string[];
-  writeDenied: string[];
-}
-
-// ── Availability ─────────────────────────────────────────────────────
 
 export async function isHealthKitAvailable(): Promise<boolean> {
   try {
@@ -60,22 +57,22 @@ export async function isHealthKitAvailable(): Promise<boolean> {
   }
 }
 
-// ── Authorization ────────────────────────────────────────────────────
-
-/**
- * Request HealthKit read+write permissions.
- * Returns true if the dialog was shown (does NOT mean all types were granted).
- */
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
-    await Health.requestAuthorization({
-      read: HEALTH_READ_TYPES,
-      write: HEALTH_WRITE_TYPES,
-    });
-    // Force session refresh after native dialog
+    const requestedTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
+    const beforeStatus = await getAuthorizationStatuses(requestedTypes);
+
+    await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
+
+    const afterStatus = await getAuthorizationStatuses(requestedTypes);
+    const grantedTypes = requestedTypes.filter((type) => afterStatus[type] === 'sharingAuthorized');
+    const deniedTypes = requestedTypes.filter((type) => afterStatus[type] === 'sharingDenied' || afterStatus[type] === 'notDetermined');
+
+    console.info('[healthkit] authorization status', { beforeStatus, afterStatus, grantedTypesCount: grantedTypes.length, deniedTypes });
+
     await forceRefreshSession();
-    return true;
+    return grantedTypes.length > 0;
   } catch (e) {
     console.error('[healthkit] Permission request failed:', e);
     await forceRefreshSession();
@@ -83,147 +80,124 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
   }
 }
 
-/**
- * Check authorization status per type BEFORE and AFTER requesting.
- * Uses plugin's checkAuthorization to get granular status.
- */
-export async function checkHealthKitAuth(): Promise<AuthorizationStatusResult | null> {
+export async function writeHealthSample(dataType: HealthDataType, value: number, startDate: string, endDate?: string): Promise<boolean> {
   try {
-    const { Health } = await import('@capgo/capacitor-health');
-    const result = await Health.checkAuthorization({
-      read: HEALTH_READ_TYPES,
-      write: HEALTH_WRITE_TYPES,
-    });
-
-    const status: AuthorizationStatusResult = {
-      readAuthorized: [],
-      readDenied: [],
-      writeAuthorized: [],
-      writeDenied: [],
-    };
-
-    // Parse plugin response — checkAuthorization returns per-type status
-    if (result && typeof result === 'object') {
-      for (const t of HEALTH_READ_TYPES) {
-        const key = `read_${t}`;
-        if ((result as any)[key] === true || (result as any)[t] === true) {
-          status.readAuthorized.push(t);
-        } else {
-          status.readDenied.push(t);
-        }
-      }
-      for (const t of HEALTH_WRITE_TYPES) {
-        const key = `write_${t}`;
-        if ((result as any)[key] === true) {
-          status.writeAuthorized.push(t);
-        } else {
-          status.writeDenied.push(t);
-        }
-      }
+    if (dataType === 'bodyTemperature') {
+      await VYRHealthBridge.writeBodyTemperature({ value, startDate, endDate });
+      return true;
+    }
+    if (dataType === 'vo2Max') {
+      await VYRHealthBridge.writeVO2Max({ value, startDate, endDate });
+      return true;
+    }
+    if (dataType === 'activeEnergyBurned') {
+      await VYRHealthBridge.writeActiveEnergyBurned({ value, startDate, endDate });
+      return true;
     }
 
-    console.info('[healthkit] auth status:', status);
-    return status;
-  } catch (e) {
-    console.warn('[healthkit] checkAuthorization failed:', e);
-    return null;
-  }
-}
-
-// ── Write samples via plugin ─────────────────────────────────────────
-
-/**
- * Write a single sample to Apple Health via the plugin.
- * Only for types in HEALTH_WRITE_TYPES.
- * For bodyTemperature, bloodPressure, vo2Max, activeEnergy → use healthkit-bridge.ts.
- * For stress → NEVER write to HealthKit (derived metric, Supabase only).
- */
-export async function writeHealthKitSample(
-  dataType: HealthDataType,
-  value: number,
-  opts?: { startDate?: string; endDate?: string; unit?: string }
-): Promise<boolean> {
-  try {
     const { Health } = await import('@capgo/capacitor-health');
-    await Health.saveSample({
-      dataType,
-      value,
-      startDate: opts?.startDate ?? new Date().toISOString(),
-      endDate: opts?.endDate,
-      unit: opts?.unit as any,
-    });
-    console.info('[healthkit][WRITE] saved', { dataType, value });
+    const writer = (Health as any).writeSample ?? (Health as any).writeData;
+    if (typeof writer !== 'function') return false;
+    await writer({ dataType, value, startDate, endDate: endDate ?? startDate });
     return true;
-  } catch (e) {
-    console.error('[healthkit][WRITE] failed', { dataType, error: e });
+  } catch (error) {
+    console.error('[healthkit] write sample failed', { dataType, error });
     return false;
   }
 }
 
-// ── Sleep quality calculation ────────────────────────────────────────
+export async function writeBloodPressure(systolic: number, diastolic: number, startDate: string, endDate?: string): Promise<boolean> {
+  try {
+    await VYRHealthBridge.writeBloodPressure({ systolic, diastolic, startDate, endDate });
+    return true;
+  } catch (error) {
+    console.error('[healthkit] write blood pressure failed', error);
+    return false;
+  }
+}
 
-export function calculateSleepQuality(samples: HealthSample[]): {
-  durationHours: number;
-  quality: number;
-} {
-  const validSamples = samples.filter(
-    (s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed'
-  );
-
+export function calculateSleepQuality(samples: HealthSample[]): { durationHours: number; quality: number } {
+  const validSamples = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
   if (validSamples.length === 0) return { durationHours: 0, quality: 0 };
 
   let totalMs = 0;
   let deepMs = 0;
   let remMs = 0;
-
   for (const s of validSamples) {
     const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
     totalMs += ms;
     if (s.sleepState === 'deep') deepMs += ms;
     if (s.sleepState === 'rem') remMs += ms;
   }
-
   if (totalMs === 0) return { durationHours: 0, quality: 0 };
-
-  const deepPct = deepMs / totalMs;
-  const remPct = remMs / totalMs;
-  const quality = Math.min(100, Math.round((deepPct + remPct * 2.5) * 100));
 
   return {
     durationHours: totalMs / (1000 * 60 * 60),
-    quality,
+    quality: Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100)),
   };
 }
-
-// ── HRV conversion ───────────────────────────────────────────────────
 
 export function convertHRVtoScale(hrvMs: number): number {
   if (hrvMs <= 0) return 0;
   return Math.min(100, Math.round((Math.log(hrvMs) / Math.log(200)) * 100));
 }
 
-// ── Incremental sync helpers ─────────────────────────────────────────
-
-const ANCHOR_PREFIX = 'hk_last_sync_';
-
-function getLastSyncTimestamp(dataType: string): string {
-  try {
-    const stored = localStorage.getItem(`${ANCHOR_PREFIX}${dataType}`);
-    if (stored) return stored;
-  } catch { /* localStorage unavailable */ }
-  // Default: 24h ago
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+function getAnchor(type: string): string | undefined {
+  return localStorage.getItem(`${ANCHOR_PREFIX}${type}`) ?? undefined;
 }
 
-function setLastSyncTimestamp(dataType: string, ts: string): void {
-  try {
-    localStorage.setItem(`${ANCHOR_PREFIX}${dataType}`, ts);
-  } catch { /* localStorage unavailable */ }
+function setAnchor(type: string, anchor?: string): void {
+  if (!anchor) return;
+  localStorage.setItem(`${ANCHOR_PREFIX}${type}`, anchor);
 }
 
-// ── Sync HealthKit data to Supabase (incremental) ────────────────────
+export async function enableHealthKitBackgroundSync(): Promise<void> {
+  try {
+    for (const type of BACKGROUND_TYPES) {
+      await VYRHealthBridge.enableBackgroundDelivery({ type, frequency: 'hourly' });
+    }
+    await VYRHealthBridge.registerObserverQueries({ types: BACKGROUND_TYPES });
 
-let syncLock = false;
+    if (!observerListenerBound) {
+      observerListenerBound = true;
+      await VYRHealthBridge.addListener('healthkitObserverUpdated', () => {
+        void runIncrementalHealthSync('observer');
+      });
+      await VYRHealthBridge.addListener('healthkitObserverError', (event) => {
+        console.error('[healthkit] observer error', event);
+      });
+    }
+  } catch (error) {
+    console.error('[healthkit] enable background delivery failed', error);
+  }
+}
+
+export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 'manual'): Promise<boolean> {
+  if (syncLock) return false;
+
+  if (syncDebounce) clearTimeout(syncDebounce);
+  await new Promise<void>((resolve) => {
+    syncDebounce = setTimeout(() => resolve(), SYNC_DEBOUNCE_MS);
+  });
+
+  syncLock = true;
+  try {
+    let changed = false;
+    for (const type of BACKGROUND_TYPES) {
+      const res = await VYRHealthBridge.readAnchored({ type, anchor: getAnchor(type), limit: 200 });
+      if ((res.samples?.length ?? 0) > 0) changed = true;
+      setAnchor(type, res.newAnchor);
+    }
+
+    if (!changed && trigger === 'observer') return true;
+    return await syncHealthKitData();
+  } catch (error) {
+    console.error('[healthkit] incremental sync failed', error);
+    return false;
+  } finally {
+    syncLock = false;
+  }
+}
 
 export async function syncHealthKitData(): Promise<boolean> {
   // Debounce / lock
@@ -235,61 +209,30 @@ export async function syncHealthKitData(): Promise<boolean> {
 
   try {
     const available = await isHealthKitAvailable();
-    if (!available) {
-      console.warn('[healthkit] HealthKit not available');
-      return false;
-    }
+    if (!available) return false;
 
     const userId = await requireValidUserId();
     const { Health } = await import('@capgo/capacitor-health');
-
     const now = new Date();
     const today = now.toISOString().split('T')[0];
-
-    // Build per-type query windows (incremental via timestamp anchor)
-    const buildOpts = (dataType: string) => ({
-      startDate: getLastSyncTimestamp(dataType),
-      endDate: now.toISOString(),
-      limit: 500,
-    });
-
+    const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
     const empty = { samples: [] as HealthSample[] };
-    const [hrData, rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] =
-      await Promise.all([
-        Health.readSamples({ ...buildOpts('heartRate'), dataType: 'heartRate' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('restingHeartRate'), dataType: 'restingHeartRate' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('heartRateVariability'), dataType: 'heartRateVariability' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('sleep'), dataType: 'sleep' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('steps'), dataType: 'steps' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('oxygenSaturation'), dataType: 'oxygenSaturation' }).catch(() => empty),
-        Health.readSamples({ ...buildOpts('respiratoryRate'), dataType: 'respiratoryRate' }).catch(() => empty),
-      ]);
 
-    console.info('[healthkit] samples read (incremental)', {
-      hr: hrData.samples.length,
-      rhr: rhrData.samples.length,
-      hrv: hrvData.samples.length,
-      sleep: sleepData.samples.length,
-      steps: stepsData.samples.length,
-      spo2: spo2Data.samples.length,
-      rr: rrData.samples.length,
-    });
+    const [rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] = await Promise.all([
+      Health.readSamples({ ...queryOpts, dataType: 'restingHeartRate' }).catch(() => empty),
+      Health.readSamples({ ...queryOpts, dataType: 'heartRateVariability' }).catch(() => empty),
+      Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
+      Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
+      Health.readSamples({ ...queryOpts, dataType: 'oxygenSaturation' }).catch(() => empty),
+      Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
+    ]);
 
-    // Process
     const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
-    const avgHrv = hrvData.samples.length > 0
-      ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length
-      : undefined;
-    const avgRhr = rhrData.samples.length > 0
-      ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length
-      : undefined;
+    const avgHrv = hrvData.samples.length > 0 ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length : undefined;
+    const avgRhr = rhrData.samples.length > 0 ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length : undefined;
     const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
-    const avgSpo2 = spo2Data.samples.length > 0
-      ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length
-      : undefined;
-    const avgRR = rrData.samples.length > 0
-      ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length
-      : undefined;
+    const avgSpo2 = spo2Data.samples.length > 0 ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length : undefined;
+    const avgRR = rrData.samples.length > 0 ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length : undefined;
 
     const metrics = {
       rhr: avgRhr ? Math.round(avgRhr) : null,
@@ -302,59 +245,16 @@ export async function syncHealthKitData(): Promise<boolean> {
       respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
     };
 
-    console.info('[healthkit] metrics computed', {
-      rhr: metrics.rhr,
-      hrv: metrics.hrv_sdnn,
-      sleep: metrics.sleep_duration_hours,
-      steps: metrics.steps,
-    });
-
-    // Upsert to ring_daily_data
     const result = await retryOnAuthErrorLabeled(async () => {
-      const res = await supabase
-        .from('ring_daily_data')
-        .upsert(
-          [{
-            user_id: userId,
-            day: today,
-            source_provider: 'apple_health',
-            metrics: metrics as unknown as Json,
-          }],
-          { onConflict: 'user_id,day,source_provider' }
-        )
-        .select();
-      return {
-        data: res.data,
-        error: res.error
-          ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint }
-          : null,
-      };
+      const res = await supabase.from('ring_daily_data').upsert([{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }], { onConflict: 'user_id,day,source_provider' }).select();
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
     }, { table: 'ring_daily_data', operation: 'upsert' });
 
-    if (result.error) {
-      return false;
-    }
+    if (result.error) return false;
 
-    // Update user_integrations
     await retryOnAuthErrorLabeled(async () => {
-      const res = await supabase
-        .from('user_integrations')
-        .upsert(
-          [{
-            user_id: userId,
-            provider: 'apple_health',
-            status: 'connected',
-            last_sync_at: new Date().toISOString(),
-          }],
-          { onConflict: 'user_id,provider' }
-        )
-        .select();
-      return {
-        data: res.data,
-        error: res.error
-          ? { code: (res.error as any).code, message: res.error.message, details: (res.error as any).details, hint: (res.error as any).hint }
-          : null,
-      };
+      const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'connected', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
+      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
     }, { table: 'user_integrations', operation: 'upsert' });
 
     // Update anchors (timestamp-based incremental)
@@ -365,7 +265,7 @@ export async function syncHealthKitData(): Promise<boolean> {
 
     return true;
   } catch (e) {
-    console.error('[DB][ERR] syncHealthKitData exception:', e);
+    console.error('[healthkit] sync exception:', e);
     return false;
   } finally {
     syncLock = false;
