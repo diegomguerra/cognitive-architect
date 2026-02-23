@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft, Heart, Activity, Info, Check, RefreshCw, Unplug } from 'lucide-react';
+import { Heart, Activity, Info, Check, RefreshCw, Unplug } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
 import { useVYRStore } from '@/hooks/useVYRStore';
@@ -48,9 +49,7 @@ const IntegrationsPage = () => {
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center gap-3 px-5 py-4">
-        <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={20} />
-        </button>
+        <BackButton />
         <div>
           <h1 className="text-lg font-semibold text-foreground">Integrações</h1>
           <p className="text-xs text-muted-foreground">Conecte dispositivos ao motor cognitivo.</p>

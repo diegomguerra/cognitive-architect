@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
 import { supabase } from '@/integrations/supabase/client';
@@ -71,9 +72,7 @@ const Notifications = () => {
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft size={20} />
-          </button>
+          <BackButton />
           <h1 className="font-mono font-bold text-foreground text-sm">Notificações</h1>
         </div>
         {hasUnread && (

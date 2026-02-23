@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { User, Bell, Link, LogOut, ChevronRight, Shield, Watch } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
+import BackButton from '@/components/BackButton';
 import BrainLogo from '@/components/BrainLogo';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useVYRStore } from '@/hooks/useVYRStore';
+import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
 
 const SettingsPage = () => {
   const navigate = useNavigate();
@@ -14,6 +16,9 @@ const SettingsPage = () => {
   const [userName, setUserName] = useState('Usuário VYR');
   const [baselineDays, setBaselineDays] = useState(0);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [insightAlerts, setInsightAlerts] = useState(true);
+  const [dailySummary, setDailySummary] = useState(true);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -21,9 +26,15 @@ const SettingsPage = () => {
     Promise.all([
       supabase.from('participantes').select('nome_publico').eq('user_id', user.id).maybeSingle(),
       supabase.from('ring_daily_data').select('day', { count: 'exact', head: true }).eq('user_id', user.id),
-    ]).then(([nameRes, baselineRes]) => {
+      supabase.from('notification_preferences').select('*').eq('user_id', user.id).maybeSingle(),
+    ]).then(([nameRes, baselineRes, notifRes]) => {
       if (nameRes.data?.nome_publico) setUserName(nameRes.data.nome_publico);
       if (baselineRes.count) setBaselineDays(Math.min(baselineRes.count, 7));
+      if (notifRes.data) {
+        setPushEnabled(notifRes.data.push_enabled);
+        setInsightAlerts(notifRes.data.insight_alerts);
+        setDailySummary(notifRes.data.daily_summary);
+      }
     });
 
     const { data } = supabase.storage.from('avatars').getPublicUrl(`${user.id}/avatar.jpg`);
@@ -33,6 +44,20 @@ const SettingsPage = () => {
   const handleSignOut = async () => {
     await signOut();
     navigate('/login');
+  };
+
+  const updateNotifPref = async (field: string, value: boolean) => {
+    try {
+      const userId = await requireValidUserId();
+      await retryOnAuthErrorLabeled(async () => {
+        return supabase.from('notification_preferences').upsert(
+          { user_id: userId, [field]: value },
+          { onConflict: 'user_id' }
+        ).select();
+      }, { table: 'notification_preferences', operation: 'upsert' });
+    } catch (err) {
+      console.error('[settings] notif pref update failed:', err);
+    }
   };
 
   const isWearableConnected = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
@@ -48,7 +73,8 @@ const SettingsPage = () => {
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
-      <header className="px-5 pt-6 pb-4">
+      <header className="flex items-center gap-3 px-5 pt-6 pb-4">
+        <BackButton />
         <h1 className="text-lg font-semibold text-foreground">Configurações</h1>
       </header>
 
@@ -119,9 +145,49 @@ const SettingsPage = () => {
           </div>
         </div>
 
-        <div className="h-px bg-border my-2" />
+        {/* Notifications section */}
+        <div className="mt-2">
+          <div className="flex items-center justify-between px-4 mb-2">
+            <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium">Notificações</p>
+            <button onClick={() => navigate('/notifications')} className="text-[10px] text-primary flex items-center gap-0.5">
+              Ver todas <ChevronRight size={12} />
+            </button>
+          </div>
+          <div className="rounded-2xl bg-card border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Bell size={18} className="text-muted-foreground" strokeWidth={1.8} />
+                <span className="text-sm font-medium text-foreground">Push notifications</span>
+              </div>
+              <button
+                onClick={() => { setPushEnabled(!pushEnabled); updateNotifPref('push_enabled', !pushEnabled); }}
+                className={`w-11 h-6 rounded-full transition-colors relative ${pushEnabled ? 'bg-primary' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-foreground transition-transform ${pushEnabled ? 'left-[22px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between pl-9">
+              <span className="text-sm text-muted-foreground">Insights cognitivos</span>
+              <button
+                onClick={() => { setInsightAlerts(!insightAlerts); updateNotifPref('insight_alerts', !insightAlerts); }}
+                className={`w-11 h-6 rounded-full transition-colors relative ${insightAlerts ? 'bg-primary' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-foreground transition-transform ${insightAlerts ? 'left-[22px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between pl-9">
+              <span className="text-sm text-muted-foreground">Lembretes de sachets</span>
+              <button
+                onClick={() => { setDailySummary(!dailySummary); updateNotifPref('daily_summary', !dailySummary); }}
+                className={`w-11 h-6 rounded-full transition-colors relative ${dailySummary ? 'bg-primary' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-foreground transition-transform ${dailySummary ? 'left-[22px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+          </div>
+        </div>
 
-        {/* Privacy */}
+        <div className="h-px bg-border my-2" />
         <div className="px-4 py-3">
           <p className="text-[10px] text-muted-foreground leading-relaxed">
             Seus dados biométricos são processados internamente e nunca compartilhados com terceiros. O algoritmo VYR opera exclusivamente no seu dispositivo e na sua conta segura.

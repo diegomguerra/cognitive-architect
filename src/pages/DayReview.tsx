@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
+import BackButton from '@/components/BackButton';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import BottomNav from '@/components/BottomNav';
@@ -91,9 +91,7 @@ const DayReview = () => {
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center gap-3 px-5 py-4">
-        <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={20} />
-        </button>
+        <BackButton />
         <div>
           <h1 className="font-mono font-bold text-foreground text-sm">Encerramento do dia</h1>
           <p className="text-[10px] text-muted-foreground">{formattedDate}</p>

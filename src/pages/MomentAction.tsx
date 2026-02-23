@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play } from 'lucide-react';
+import { Play } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import BottomNav from '@/components/BottomNav';
 import SachetConfirmation from '@/components/SachetConfirmation';
 import CheckpointModal from '@/components/CheckpointModal';
@@ -53,9 +54,7 @@ const MomentAction = () => {
         style={{ background: `linear-gradient(to bottom, ${config.color}33, transparent)` }}
       >
         <header className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft size={20} />
-          </button>
+          <BackButton />
           <h1 className="font-mono font-bold text-foreground text-sm">Protocolo {config.label}</h1>
         </header>
 

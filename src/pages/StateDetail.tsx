@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { ArrowLeft } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import BackButton from '@/components/BackButton';
 import StateRing from '@/components/StateRing';
 import PillarRing from '@/components/PillarRing';
 import InsightCard from '@/components/InsightCard';
@@ -15,19 +14,13 @@ const pillarData = [
 ];
 
 const StateDetail = () => {
-  const navigate = useNavigate();
   const { state, hasData } = useVYRStore();
   const interpretation = useMemo(() => interpret(state), [state]);
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center justify-between px-5 py-4">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-            <ArrowLeft size={20} />
-          </button>
-          <h1 className="font-mono font-bold text-foreground text-sm">Estado atual</h1>
-        </div>
+        <BackButton />
         <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
           Nível: {state.level}
         </span>

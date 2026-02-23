@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
+import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -84,9 +85,7 @@ const Profile = () => {
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
       <header className="flex items-center gap-3 px-5 py-4">
-        <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={20} />
-        </button>
+        <BackButton />
         <h1 className="font-mono font-bold text-foreground text-sm">Meu Perfil</h1>
       </header>
 
