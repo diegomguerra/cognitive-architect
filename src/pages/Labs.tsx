@@ -1,41 +1,62 @@
-import { FlaskConical, Brain, BarChart3, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
+import PerceptionsTab from '@/components/labs/PerceptionsTab';
+import ReviewsTab from '@/components/labs/ReviewsTab';
+import SignalsTab from '@/components/labs/SignalsTab';
+import HistoryTab from '@/components/labs/HistoryTab';
 
-const labItems = [
-  { icon: Brain, title: 'Percepções', desc: 'Avalie seu estado subjetivo', badge: 'Ativo' },
-  { icon: BarChart3, title: 'Histórico', desc: 'Evolução dos últimos 14 dias', badge: 'Em breve' },
-  { icon: Zap, title: 'Sinais', desc: 'Biomarcadores detalhados', badge: 'Em breve' },
-  { icon: FlaskConical, title: 'Revisões', desc: 'Revisão diária e checkpoints', badge: 'Em breve' },
-];
+const tabs = ['Histórico', 'Percepções', 'Revisões', 'Sinais'] as const;
+type Tab = (typeof tabs)[number];
 
 const Labs = () => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as Tab) || 'Percepções';
+  const [activeTab, setActiveTab] = useState<Tab>(
+    tabs.includes(initialTab as Tab) ? initialTab as Tab : 'Percepções'
+  );
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
+
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top">
-      <header className="px-5 pt-6 pb-4">
+      <header className="flex items-center gap-3 px-5 py-4">
+        <button onClick={() => navigate(-1)} className="text-muted-foreground hover:text-foreground">
+          <ArrowLeft size={20} />
+        </button>
         <h1 className="text-lg font-semibold text-foreground">Labs</h1>
-        <p className="text-sm text-vyr-text-secondary mt-1">Ferramentas de análise cognitiva</p>
       </header>
 
-      <div className="px-5 space-y-3">
-        {labItems.map(({ icon: Icon, title, desc, badge }) => (
-          <button
-            key={title}
-            className="w-full rounded-2xl bg-card p-4 flex items-center gap-4 text-left transition-transform active:scale-[0.98]"
-          >
-            <div className="w-10 h-10 rounded-xl bg-vyr-bg-elevated flex items-center justify-center flex-shrink-0">
-              <Icon size={20} className="text-vyr-text-secondary" strokeWidth={1.8} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{title}</span>
-                <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded ${badge === 'Ativo' ? 'text-vyr-positive bg-vyr-positive/10' : 'text-vyr-text-muted bg-vyr-bg-elevated'}`}>
-                  {badge}
-                </span>
-              </div>
-              <p className="text-xs text-vyr-text-secondary mt-0.5">{desc}</p>
-            </div>
-          </button>
-        ))}
+      {/* Tabs */}
+      <div className="px-5 mb-4">
+        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => handleTabChange(tab)}
+              className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
+                activeTab === tab
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-card text-muted-foreground'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div className="px-5">
+        {activeTab === 'Histórico' && <HistoryTab />}
+        {activeTab === 'Percepções' && <PerceptionsTab />}
+        {activeTab === 'Revisões' && <ReviewsTab />}
+        {activeTab === 'Sinais' && <SignalsTab />}
       </div>
 
       <BottomNav />
