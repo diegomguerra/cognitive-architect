@@ -2,14 +2,61 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Labs from "./pages/Labs";
 import SettingsPage from "./pages/Settings";
+import StateDetail from "./pages/StateDetail";
+import MomentAction from "./pages/MomentAction";
+import History from "./pages/History";
+import Perceptions from "./pages/Perceptions";
+import Reviews from "./pages/Reviews";
+import Signals from "./pages/Signals";
+import IntegrationsPage from "./pages/Integrations";
+import Profile from "./pages/Profile";
+import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="min-h-dvh bg-background" />;
+  if (!session) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="min-h-dvh bg-background" />;
+  if (session) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+const AppRoutes = () => (
+  <Routes>
+    <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+    <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
+    <Route path="/reset-password" element={<ResetPassword />} />
+    <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+    <Route path="/labs" element={<ProtectedRoute><Labs /></ProtectedRoute>} />
+    <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+    <Route path="/state" element={<ProtectedRoute><StateDetail /></ProtectedRoute>} />
+    <Route path="/action" element={<ProtectedRoute><MomentAction /></ProtectedRoute>} />
+    <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+    <Route path="/perceptions" element={<ProtectedRoute><Perceptions /></ProtectedRoute>} />
+    <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
+    <Route path="/signals" element={<ProtectedRoute><Signals /></ProtectedRoute>} />
+    <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
+    <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+    <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+    <Route path="*" element={<NotFound />} />
+  </Routes>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -17,13 +64,9 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/labs" element={<Labs />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
