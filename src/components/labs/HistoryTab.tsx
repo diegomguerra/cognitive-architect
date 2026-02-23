@@ -1,16 +1,8 @@
-import { useEffect, useState } from 'react';
-import { TrendingUp, TrendingDown } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import MiniScoreRing from '@/components/MiniScoreRing';
 import EvolutionChart from '@/components/EvolutionChart';
-
-interface DayData {
-  day: string;
-  score: number;
-  level: string;
-  pillars: { energia: number; clareza: number; estabilidade: number };
-}
+import PatternCard from '@/components/PatternCard';
+import { useVYRStore } from '@/hooks/useVYRStore';
 
 function formatDate(iso: string): string {
   const d = new Date(iso + 'T12:00:00');
@@ -24,31 +16,12 @@ function getDayNote(score: number): string {
   return 'Dia de recuperação necessária.';
 }
 
+const weekdayShort = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
 const HistoryTab = () => {
-  const { session } = useAuth();
-  const [days, setDays] = useState<DayData[]>([]);
+  const { historyByDay } = useVYRStore();
 
-  useEffect(() => {
-    if (!session?.user?.id) return;
-
-    supabase.from('computed_states')
-      .select('day, score, level, pillars')
-      .eq('user_id', session.user.id)
-      .order('day', { ascending: false })
-      .limit(30)
-      .then(({ data }) => {
-        if (data) {
-          setDays(data.map((d) => ({
-            day: d.day,
-            score: d.score ?? 0,
-            level: d.level ?? 'Crítico',
-            pillars: d.pillars as any ?? { energia: 0, clareza: 0, estabilidade: 0 },
-          })));
-        }
-      });
-  }, [session?.user?.id]);
-
-  if (days.length === 0) {
+  if (historyByDay.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <p className="text-sm text-muted-foreground">Sem histórico disponível ainda.</p>
@@ -56,26 +29,23 @@ const HistoryTab = () => {
     );
   }
 
-  const chartData = [...days].reverse().map((d) => ({
-    date: new Date(d.day + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short' }),
+  const chartData = [...historyByDay].reverse().map((d) => ({
+    date: weekdayShort[new Date(d.day + 'T12:00:00').getDay()],
     score: d.score,
-    energia: d.pillars.energia,
-    clareza: d.pillars.clareza,
-    estabilidade: d.pillars.estabilidade,
+    fullDate: d.day,
   }));
 
   const today = new Date().toISOString().split('T')[0];
 
   return (
     <div className="space-y-4">
-      {/* Chart */}
       <EvolutionChart data={chartData} />
+      <PatternCard historyByDay={historyByDay} />
 
-      {/* Day List */}
       <div className="space-y-3">
-        {days.map((d, i) => {
+        {historyByDay.map((d, i) => {
           const isToday = d.day === today;
-          const prevScore = i < days.length - 1 ? days[i + 1].score : null;
+          const prevScore = i < historyByDay.length - 1 ? historyByDay[i + 1].score : null;
           const delta = prevScore != null ? d.score - prevScore : 0;
 
           return (

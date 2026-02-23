@@ -3,11 +3,18 @@ interface MiniScoreRingProps {
   size?: number;
 }
 
+function getScoreColor(score: number): string {
+  if (score >= 70) return 'hsl(var(--vyr-accent-action))';
+  if (score >= 40) return 'hsl(var(--vyr-accent-transition))';
+  return '#EF4444';
+}
+
 const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
   const strokeWidth = 3;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
+  const color = getScoreColor(score);
 
   return (
     <svg width={size} height={size} className="transform -rotate-90">
@@ -24,7 +31,7 @@ const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
         cy={size / 2}
         r={radius}
         fill="none"
-        stroke="hsl(var(--primary))"
+        stroke={color}
         strokeWidth={strokeWidth}
         strokeDasharray={circumference}
         strokeDashoffset={offset}
@@ -35,7 +42,7 @@ const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
         y={size / 2}
         textAnchor="middle"
         dominantBaseline="central"
-        className="fill-foreground text-[9px] font-mono font-bold"
+        className="fill-foreground text-sm font-medium"
         transform={`rotate(90, ${size / 2}, ${size / 2})`}
       >
         {score}
