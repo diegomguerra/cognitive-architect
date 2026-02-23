@@ -12,10 +12,7 @@ import Labs from "./pages/Labs";
 import SettingsPage from "./pages/Settings";
 import StateDetail from "./pages/StateDetail";
 import MomentAction from "./pages/MomentAction";
-import History from "./pages/History";
-import Perceptions from "./pages/Perceptions";
-import Reviews from "./pages/Reviews";
-import Signals from "./pages/Signals";
+import DayReview from "./pages/DayReview";
 import IntegrationsPage from "./pages/Integrations";
 import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
@@ -47,10 +44,7 @@ const AppRoutes = () => (
     <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
     <Route path="/state" element={<ProtectedRoute><StateDetail /></ProtectedRoute>} />
     <Route path="/action" element={<ProtectedRoute><MomentAction /></ProtectedRoute>} />
-    <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
-    <Route path="/perceptions" element={<ProtectedRoute><Perceptions /></ProtectedRoute>} />
-    <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
-    <Route path="/signals" element={<ProtectedRoute><Signals /></ProtectedRoute>} />
+    <Route path="/day-review/:day" element={<ProtectedRoute><DayReview /></ProtectedRoute>} />
     <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />

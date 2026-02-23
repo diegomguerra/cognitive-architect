@@ -107,6 +107,18 @@
   .safe-area-bottom {
     padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
   }
+
+  .animate-delta-pulse {
+    animation: delta-pulse 2s ease-in-out infinite;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* VYR Animations */
