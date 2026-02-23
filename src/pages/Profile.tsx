@@ -68,7 +68,7 @@ const Profile = () => {
       await retryOnAuthErrorLabeled(async () => {
         const result = await supabase.from('participantes').upsert(payload, { onConflict: 'user_id' }).select();
         return result;
-      });
+      }, { table: 'participantes', operation: 'upsert' });
 
       toast.success('Perfil salvo com sucesso');
     } catch (err) {

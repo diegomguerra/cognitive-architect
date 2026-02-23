@@ -157,7 +157,7 @@ export function useVYRStore() {
         payload: { confirmed_at: new Date().toISOString(), ...payload },
       }).select();
       return result;
-    });
+    }, { table: 'action_logs', operation: 'insert' });
     setActionLogs((prev) => [...prev, {
       id: crypto.randomUUID(),
       action_type: phase,
@@ -177,7 +177,7 @@ export function useVYRStore() {
         data: { note, timestamp: new Date().toISOString() },
       }).select();
       return result;
-    });
+    }, { table: 'checkpoints', operation: 'insert' });
     setCheckpoints((prev) => [...prev, {
       id: crypto.randomUUID(),
       checkpoint_type: 'observation',
@@ -208,7 +208,7 @@ export function useVYRStore() {
           scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation'],
         }, { onConflict: 'user_id,provider' } as any).select();
         return result;
-      });
+      }, { table: 'user_integrations', operation: 'upsert' });
       setWearableConnection({
         provider: 'apple_health',
         status: 'active',
@@ -228,7 +228,7 @@ export function useVYRStore() {
         .eq('provider', 'apple_health')
         .select();
       return result;
-    });
+    }, { table: 'user_integrations', operation: 'update' });
     setWearableConnection(null);
   }, []);
 
