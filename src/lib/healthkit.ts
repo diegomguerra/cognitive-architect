@@ -1,5 +1,6 @@
 /**
  * HealthKit integration via @capgo/capacitor-health (Capacitor 8)
+ * + VYRHealthBridge for types not covered by the plugin.
  */
 
 import { forceRefreshSession, requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
@@ -8,15 +9,24 @@ import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 
+// Types the plugin supports natively
 export const HEALTH_READ_TYPES: HealthDataType[] = [
-  'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation',
-  'respiratoryRate', 'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+  'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate',
 ];
 export const HEALTH_WRITE_TYPES: HealthDataType[] = [
-  'steps', 'bodyTemperature', 'sleep', 'heartRate', 'heartRateVariability',
-  'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'oxygenSaturation', 'activeEnergyBurned',
+  'steps', 'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'oxygenSaturation', 'respiratoryRate',
 ];
-const BACKGROUND_TYPES = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
+
+// Types handled exclusively by the Swift bridge (not in HealthDataType union)
+export const BRIDGE_ONLY_READ_TYPES = [
+  'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+] as const;
+export const BRIDGE_ONLY_WRITE_TYPES = [
+  'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+] as const;
+
+// All types for background delivery (plugin + bridge)
+const ALL_SYNC_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_ONLY_READ_TYPES.filter(t => !HEALTH_READ_TYPES.includes(t as any))];
 
 const ANCHOR_PREFIX = 'healthkit.anchor.';
 const SYNC_DEBOUNCE_MS = 1500;
@@ -26,24 +36,28 @@ let observerListenerBound = false;
 
 export type HealthAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sharingAuthorized' | 'unknown';
 
-async function getAuthorizationStatuses(types: HealthDataType[]): Promise<Record<string, HealthAuthorizationStatus>> {
+async function getAuthorizationStatuses(types: string[]): Promise<Record<string, HealthAuthorizationStatus>> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
-    const checker = (Health as any).checkAuthorization;
-    if (typeof checker === 'function') {
-      const result = await checker({ types });
-      const statuses = result?.statuses ?? {};
-      return Object.fromEntries(types.map((type) => [type, statuses[type] ?? 'unknown']));
+    const pluginTypes = types.filter(t => HEALTH_READ_TYPES.includes(t as HealthDataType)) as HealthDataType[];
+    const result = await Health.checkAuthorization({ read: pluginTypes, write: pluginTypes });
+    const statuses: Record<string, HealthAuthorizationStatus> = {};
+    for (const t of pluginTypes) {
+      statuses[t] = result.readAuthorized.includes(t) ? 'sharingAuthorized' : result.readDenied.includes(t) ? 'sharingDenied' : 'notDetermined';
     }
+    // Bridge types
+    const bridgeTypes = types.filter(t => !HEALTH_READ_TYPES.includes(t as HealthDataType));
+    if (bridgeTypes.length > 0) {
+      try {
+        const bridgeResult = await VYRHealthBridge.getAuthorizationStatuses({ types: bridgeTypes });
+        Object.assign(statuses, Object.fromEntries(bridgeTypes.map(t => [t, bridgeResult.statuses[t] ?? 'unknown'])));
+      } catch {
+        for (const t of bridgeTypes) statuses[t] = 'unknown';
+      }
+    }
+    return statuses;
   } catch {
-    // fallback below
-  }
-
-  try {
-    const result = await VYRHealthBridge.getAuthorizationStatuses({ types });
-    return Object.fromEntries(types.map((type) => [type, result.statuses[type] ?? 'unknown']));
-  } catch {
-    return Object.fromEntries(types.map((type) => [type, 'unknown']));
+    return Object.fromEntries(types.map(t => [t, 'unknown' as HealthAuthorizationStatus]));
   }
 }
 
@@ -60,14 +74,14 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
-    const requestedTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
-    const beforeStatus = await getAuthorizationStatuses(requestedTypes);
+    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
+    const beforeStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_ONLY_READ_TYPES]);
 
     await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
 
-    const afterStatus = await getAuthorizationStatuses(requestedTypes);
-    const grantedTypes = requestedTypes.filter((type) => afterStatus[type] === 'sharingAuthorized');
-    const deniedTypes = requestedTypes.filter((type) => afterStatus[type] === 'sharingDenied' || afterStatus[type] === 'notDetermined');
+    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_ONLY_READ_TYPES]);
+    const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
+    const deniedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingDenied' || s === 'notDetermined').map(([t]) => t);
 
     console.info('[healthkit] authorization status', { beforeStatus, afterStatus, grantedTypesCount: grantedTypes.length, deniedTypes });
 
@@ -80,8 +94,9 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
   }
 }
 
-export async function writeHealthSample(dataType: HealthDataType, value: number, startDate: string, endDate?: string): Promise<boolean> {
+export async function writeHealthSample(dataType: string, value: number, startDate: string, endDate?: string): Promise<boolean> {
   try {
+    // Bridge-only types
     if (dataType === 'bodyTemperature') {
       await VYRHealthBridge.writeBodyTemperature({ value, startDate, endDate });
       return true;
@@ -95,11 +110,14 @@ export async function writeHealthSample(dataType: HealthDataType, value: number,
       return true;
     }
 
-    const { Health } = await import('@capgo/capacitor-health');
-    const writer = (Health as any).writeSample ?? (Health as any).writeData;
-    if (typeof writer !== 'function') return false;
-    await writer({ dataType, value, startDate, endDate: endDate ?? startDate });
-    return true;
+    // Plugin-supported types
+    if (HEALTH_WRITE_TYPES.includes(dataType as HealthDataType)) {
+      const { Health } = await import('@capgo/capacitor-health');
+      await Health.saveSample({ dataType: dataType as HealthDataType, value, startDate, endDate: endDate ?? startDate });
+      return true;
+    }
+
+    return false;
   } catch (error) {
     console.error('[healthkit] write sample failed', { dataType, error });
     return false;
@@ -151,12 +169,16 @@ function setAnchor(type: string, anchor?: string): void {
   localStorage.setItem(`${ANCHOR_PREFIX}${type}`, anchor);
 }
 
+function setLastSyncTimestamp(type: string, iso: string): void {
+  localStorage.setItem(`${ANCHOR_PREFIX}ts.${type}`, iso);
+}
+
 export async function enableHealthKitBackgroundSync(): Promise<void> {
   try {
-    for (const type of BACKGROUND_TYPES) {
-      await VYRHealthBridge.enableBackgroundDelivery({ type, frequency: 'hourly' });
+    for (const type of ALL_SYNC_TYPES) {
+      await VYRHealthBridge.enableBackgroundDelivery({ type: String(type), frequency: 'hourly' });
     }
-    await VYRHealthBridge.registerObserverQueries({ types: BACKGROUND_TYPES });
+    await VYRHealthBridge.registerObserverQueries({ types: ALL_SYNC_TYPES.map(String) });
 
     if (!observerListenerBound) {
       observerListenerBound = true;
@@ -183,10 +205,10 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
   syncLock = true;
   try {
     let changed = false;
-    for (const type of BACKGROUND_TYPES) {
-      const res = await VYRHealthBridge.readAnchored({ type, anchor: getAnchor(type), limit: 200 });
+    for (const type of ALL_SYNC_TYPES) {
+      const res = await VYRHealthBridge.readAnchored({ type: String(type), anchor: getAnchor(String(type)), limit: 200 });
       if ((res.samples?.length ?? 0) > 0) changed = true;
-      setAnchor(type, res.newAnchor);
+      setAnchor(String(type), res.newAnchor);
     }
 
     if (!changed && trigger === 'observer') return true;
@@ -200,7 +222,6 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
 }
 
 export async function syncHealthKitData(): Promise<boolean> {
-  // Debounce / lock
   if (syncLock) {
     console.warn('[healthkit] sync already in progress, skipping');
     return false;
@@ -214,6 +235,7 @@ export async function syncHealthKitData(): Promise<boolean> {
     const userId = await requireValidUserId();
     const { Health } = await import('@capgo/capacitor-health');
     const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const today = now.toISOString().split('T')[0];
     const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
     const empty = { samples: [] as HealthSample[] };
@@ -257,9 +279,8 @@ export async function syncHealthKitData(): Promise<boolean> {
       return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
     }, { table: 'user_integrations', operation: 'upsert' });
 
-    // Update anchors (timestamp-based incremental)
     const nowIso = now.toISOString();
-    for (const dt of ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate']) {
+    for (const dt of HEALTH_READ_TYPES) {
       setLastSyncTimestamp(dt, nowIso);
     }
 
