@@ -200,6 +200,13 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
 }
 
 export async function syncHealthKitData(): Promise<boolean> {
+  // Debounce / lock
+  if (syncLock) {
+    console.warn('[healthkit] sync already in progress, skipping');
+    return false;
+  }
+  syncLock = true;
+
   try {
     const available = await isHealthKitAvailable();
     if (!available) return false;
@@ -207,7 +214,6 @@ export async function syncHealthKitData(): Promise<boolean> {
     const userId = await requireValidUserId();
     const { Health } = await import('@capgo/capacitor-health');
     const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const today = now.toISOString().split('T')[0];
     const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
     const empty = { samples: [] as HealthSample[] };
@@ -251,9 +257,17 @@ export async function syncHealthKitData(): Promise<boolean> {
       return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
     }, { table: 'user_integrations', operation: 'upsert' });
 
+    // Update anchors (timestamp-based incremental)
+    const nowIso = now.toISOString();
+    for (const dt of ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate']) {
+      setLastSyncTimestamp(dt, nowIso);
+    }
+
     return true;
   } catch (e) {
     console.error('[healthkit] sync exception:', e);
     return false;
+  } finally {
+    syncLock = false;
   }
 }

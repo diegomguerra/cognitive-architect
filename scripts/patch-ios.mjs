@@ -2,9 +2,13 @@
 
 /**
  * patch-ios.mjs
- * Run after `npx cap sync ios` to configure HealthKit entitlements and usage descriptions.
+ * Idempotent merge-based patching for HealthKit entitlements and usage descriptions.
+ * Run after `npx cap sync ios`.
  *
- * Usage: node scripts/patch-ios.mjs
+ * RULES:
+ * - Never overwrites existing keys — only adds missing ones.
+ * - Never inserts health-records (we don't use clinical data).
+ * - Preserves background-delivery if already present.
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -13,7 +17,7 @@ import { join } from 'path';
 const IOS_DIR = join(process.cwd(), 'ios', 'App', 'App');
 const PBXPROJ = join(process.cwd(), 'ios', 'App', 'App.xcodeproj', 'project.pbxproj');
 
-// 1. Patch Info.plist
+// ── 1. Patch Info.plist (merge, don't overwrite) ───────────────────
 function patchInfoPlist() {
   const plistPath = join(IOS_DIR, 'Info.plist');
   if (!existsSync(plistPath)) {
@@ -22,6 +26,7 @@ function patchInfoPlist() {
   }
 
   let plist = readFileSync(plistPath, 'utf8');
+  let changed = false;
 
   const healthDescriptions = `
 	<key>NSHealthShareUsageDescription</key>
@@ -34,8 +39,21 @@ function patchInfoPlist() {
     writeFileSync(plistPath, plist);
     console.log('✅ Info.plist patched with HealthKit usage descriptions');
   } else {
-    console.log('ℹ️  Info.plist already has HealthKit descriptions');
+    console.log('ℹ️  NSHealthShareUsageDescription already present');
   }
+
+  // NSHealthUpdateUsageDescription
+  if (!plist.includes('NSHealthUpdateUsageDescription')) {
+    const desc = `\t<key>NSHealthUpdateUsageDescription</key>
+\t<string>VYR Labs writes steps, heart rate, HRV, sleep, SpO2, body temperature, blood pressure, VO2 max, and active energy back to Apple Health so you can view cognitive wellness trends alongside your health data. No raw data is modified. Disable anytime in Settings › Privacy › Health.</string>`;
+    plist = plist.replace(/<\/dict>\s*<\/plist>/, `${desc}\n</dict>\n</plist>`);
+    changed = true;
+    console.log('✅ Added NSHealthUpdateUsageDescription');
+  } else {
+    console.log('ℹ️  NSHealthUpdateUsageDescription already present');
+  }
+
+  if (changed) writeFileSync(plistPath, plist);
 }
 
 function ensureEntitlementKey(xml, key, valueXml) {
@@ -56,6 +74,19 @@ function patchEntitlements() {
 <dict>
 </dict>
 </plist>`;
+  } else {
+    // Merge missing keys before </dict>
+    let insertions = '';
+    if (needsHealthkit) {
+      insertions += '\t<key>com.apple.developer.healthkit</key>\n\t<true/>\n';
+    }
+    if (needsBgDelivery) {
+      insertions += '\t<key>com.apple.developer.healthkit.background-delivery</key>\n\t<true/>\n';
+    }
+    if (insertions) {
+      existing = existing.replace(/<\/dict>/, `${insertions}</dict>`);
+    }
+  }
 
   let xml = existsSync(entPath) ? readFileSync(entPath, 'utf8') : defaultXml;
 
@@ -69,7 +100,7 @@ function patchEntitlements() {
   console.log('✅ App.entitlements merged (idempotent), no health-records added');
 }
 
-// 3. Patch project.pbxproj to add HealthKit SystemCapability
+// ── 3. Patch project.pbxproj ───────────────────────────────────────
 function patchPbxproj() {
   if (!existsSync(PBXPROJ)) {
     console.error('❌ project.pbxproj not found at', PBXPROJ);
@@ -77,6 +108,7 @@ function patchPbxproj() {
   }
 
   let pbx = readFileSync(PBXPROJ, 'utf8');
+  let changed = false;
 
   if (!pbx.includes('com.apple.HealthKit')) {
     if (pbx.includes('SystemCapabilities = {')) {
@@ -95,7 +127,9 @@ function patchPbxproj() {
     pbx = readFileSync(PBXPROJ, 'utf8');
     pbx = pbx.replace(/CODE_SIGN_ENTITLEMENTS = ""/g, 'CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"');
     writeFileSync(PBXPROJ, pbx);
-    console.log('✅ Entitlements reference added to project.pbxproj');
+    console.log('✅ project.pbxproj patched');
+  } else {
+    console.log('ℹ️  project.pbxproj already correct');
   }
 }
 
