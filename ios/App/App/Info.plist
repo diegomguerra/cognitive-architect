@@ -46,8 +46,8 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSHealthShareUsageDescription</key>
-	<string>VYR Labs precisa acessar seus dados de saúde (frequência cardíaca, variabilidade cardíaca, sono, SpO2) para calcular seu estado cognitivo e gerar insights personalizados.</string>
+	<string>VYR Labs reads your heart rate, resting heart rate, heart rate variability (HRV), sleep analysis, step count, blood oxygen saturation (SpO2), and respiratory rate to calculate your daily cognitive performance score and provide personalized insights. This data is processed locally on your device and securely stored in your private account. You can revoke access at any time in Settings › Privacy › Health.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>VYR Labs pode registrar dados de saúde para manter seu histórico de performance cognitiva sincronizado.</string>
+	<string>VYR Labs writes summary records of your cognitive performance metrics back to Apple Health so you can view your cognitive wellness trends alongside your other health data. No raw biometric data is modified. You can disable write access at any time in Settings › Privacy › Health.</string>
 </dict>
 </plist>
