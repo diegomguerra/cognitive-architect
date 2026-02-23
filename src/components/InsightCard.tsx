@@ -6,6 +6,8 @@ interface InsightCardProps {
   type: InsightType;
   title: string;
   description: string;
+  detail?: string;
+  muted?: string;
 }
 
 const config: Record<InsightType, { icon: typeof Lightbulb; colorVar: string }> = {
@@ -14,7 +16,7 @@ const config: Record<InsightType, { icon: typeof Lightbulb; colorVar: string }> 
   positive: { icon: TrendingUp, colorVar: '--vyr-accent-stable' },
 };
 
-const InsightCard = ({ type, title, description }: InsightCardProps) => {
+const InsightCard = ({ type, title, description, detail, muted }: InsightCardProps) => {
   const { icon: Icon, colorVar } = config[type];
 
   return (
@@ -32,6 +34,8 @@ const InsightCard = ({ type, title, description }: InsightCardProps) => {
         <div className="min-w-0">
           <h4 className="text-sm font-medium text-vyr-text-primary">{title}</h4>
           <p className="text-xs text-vyr-text-secondary mt-1 leading-relaxed">{description}</p>
+          {detail && <p className="text-xs text-vyr-text-secondary mt-1 leading-relaxed">{detail}</p>}
+          {muted && <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">{muted}</p>}
         </div>
       </div>
     </div>
