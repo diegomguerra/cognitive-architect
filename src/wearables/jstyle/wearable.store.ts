@@ -1,17 +1,22 @@
 /**
  * wearable.store — Reactive global state for wearable connection.
- * Framework-agnostic; React hook wraps this via useSyncExternalStore pattern.
+ * Supports multiple models (X3, J5Vital) via adapter switching.
  */
 
 import type {
   WearableDevice,
   WearableStatus,
   BiomarkerType,
+  BiomarkerTypeCore,
   SyncProgress,
   BiomarkerSample,
   DeviceDiagnostics,
+  WearableAdapter,
+  WearableModel,
 } from './wearable.types';
+import { CORE_BIOMARKER_TYPES, V5_EXTENDED_TYPES, isV5ExtendedEnabled } from './wearable.types';
 import { JStyleAdapter } from './JStyleAdapter';
+import { JStyleV5Adapter } from './v5/JStyleV5Adapter';
 import { wlog } from './wearable.telemetry';
 
 const JSTYLE_ENABLED = import.meta.env.VITE_JSTYLE_ENABLED !== 'false';
@@ -24,6 +29,7 @@ export interface WearableState {
   pendingSamples: Map<BiomarkerType, BiomarkerSample[]>;
   diagnostics: DeviceDiagnostics | null;
   lastSyncAt: string | null;
+  selectedModel: WearableModel;
 }
 
 function createInitialState(): WearableState {
@@ -35,37 +41,44 @@ function createInitialState(): WearableState {
     pendingSamples: new Map(),
     diagnostics: null,
     lastSyncAt: null,
+    selectedModel: 'X3',
   };
 }
 
 class WearableStore {
   private state: WearableState = createInitialState();
   private listeners = new Set<() => void>();
-  readonly adapter = new JStyleAdapter();
+  private adapterX3 = new JStyleAdapter();
+  private adapterV5 = new JStyleV5Adapter();
+
+  get adapter(): WearableAdapter {
+    return this.state.selectedModel === 'J5Vital' ? this.adapterV5 : this.adapterX3;
+  }
 
   constructor() {
     if (!JSTYLE_ENABLED) return;
-    this.wireAdapter();
+    this.wireAdapter(this.adapterX3);
+    this.wireAdapter(this.adapterV5);
   }
 
-  private wireAdapter() {
-    this.adapter.on('onDeviceFound', (device) => {
+  private wireAdapter(adapter: WearableAdapter) {
+    adapter.on('onDeviceFound', (device) => {
       wlog('store', 'deviceFound', device.deviceId);
       if (!this.state.devices.find((d) => d.deviceId === device.deviceId)) {
         this.patch({ devices: [...this.state.devices, device] });
       }
     });
 
-    this.adapter.on('onConnected', (device) => {
+    adapter.on('onConnected', (device) => {
       wlog('store', 'connected', device.deviceId);
       this.patch({
         connectedDevice: device,
         status: 'connected',
-        diagnostics: this.adapter.getDiagnostics(),
+        diagnostics: adapter.getDiagnostics(),
       });
     });
 
-    this.adapter.on('onData', (type, samples) => {
+    adapter.on('onData', (type, samples) => {
       wlog('store', 'data', type, samples.length);
       const existing = this.state.pendingSamples.get(type) ?? [];
       const updated = new Map(this.state.pendingSamples);
@@ -77,7 +90,7 @@ class WearableStore {
       this.patch({ pendingSamples: updated, syncProgress: progress });
     });
 
-    this.adapter.on('onSyncEnd', (type) => {
+    adapter.on('onSyncEnd', (type) => {
       wlog('store', 'syncEnd', type);
       const progress = new Map(this.state.syncProgress);
       progress.set(type, {
@@ -88,7 +101,7 @@ class WearableStore {
       this.patch({ syncProgress: progress });
     });
 
-    this.adapter.on('onError', (code, message) => {
+    adapter.on('onError', (code, message) => {
       wlog('store', 'error', code, message);
       this.patch({ status: 'error' });
     });
@@ -97,6 +110,22 @@ class WearableStore {
   // --- State access ---
   getState(): Readonly<WearableState> { return this.state; }
   static isEnabled(): boolean { return JSTYLE_ENABLED; }
+
+  // --- Model selection ---
+  selectModel(model: WearableModel) {
+    if (this.state.connectedDevice) return; // can't switch while connected
+    wlog('store', 'selectModel', model);
+    this.patch({ selectedModel: model, devices: [], status: 'idle' });
+  }
+
+  /** Get sync types based on selected model */
+  getSyncTypes(): BiomarkerType[] {
+    const core: BiomarkerType[] = [...CORE_BIOMARKER_TYPES];
+    if (this.state.selectedModel === 'J5Vital' && isV5ExtendedEnabled()) {
+      return [...core, ...V5_EXTENDED_TYPES];
+    }
+    return core;
+  }
 
   // --- Subscriptions ---
   subscribe(fn: () => void): () => void {
@@ -133,7 +162,7 @@ class WearableStore {
 
   async sync(options?: { since?: string }) {
     if (!this.state.connectedDevice) return;
-    const types: BiomarkerType[] = ['sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr'];
+    const types = this.getSyncTypes();
     const progress = new Map<BiomarkerType, SyncProgress>();
     types.forEach((t) => progress.set(t, { type: t, status: 'pending' }));
     this.patch({ pendingSamples: new Map(), syncProgress: progress, status: 'syncing' });

@@ -1,24 +1,34 @@
 /**
  * WearableModule — Main wearable integration screen (production).
- * Feature-flagged: only renders if JSTYLE_ENABLED.
+ * Supports X3 ring and J5Vital bracelet.
  */
 
 import { useState, useEffect } from 'react';
-import { Bluetooth, Loader2, RefreshCw, Check, AlertCircle, Unplug, Info } from 'lucide-react';
+import { Bluetooth, Loader2, RefreshCw, Check, AlertCircle, Unplug, Info, Watch } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import { flushSamplesToBackend } from './wearable.sync';
 import { isDebugEnabled } from './wearable.telemetry';
-import type { BiomarkerType, SyncProgress } from './wearable.types';
+import type { BiomarkerType, WearableModel } from './wearable.types';
 import { toast } from 'sonner';
+import WearableModelPicker from './WearableModelPicker';
+import WearableSyncPanel from './WearableSyncPanel';
+import WearableDiagnostics from './WearableDiagnostics';
 
-const BIOMARKER_LABELS: Record<BiomarkerType, string> = {
+const BIOMARKER_LABELS: Record<string, string> = {
   sleep: 'Sono',
   hrv: 'HRV',
   spo2: 'SpO₂',
   temp: 'Temperatura',
   steps: 'Passos',
   hr: 'Frequência Cardíaca',
+  ecg_history: 'ECG (Histórico)',
+  ecg_raw: 'ECG (Raw)',
+  ppg: 'PPG',
+  ppi: 'PPI',
+  rr_interval: 'Intervalo RR',
 };
+
+export { BIOMARKER_LABELS };
 
 export default function WearableModule() {
   const [, forceUpdate] = useState(0);
@@ -31,12 +41,9 @@ export default function WearableModule() {
   if (!enabled) return null;
 
   const state = wearableStore.getState();
-  const { status, devices, connectedDevice, syncProgress, diagnostics, lastSyncAt } = state;
+  const { status, devices, connectedDevice, lastSyncAt, selectedModel } = state;
 
   const isScanning = status === 'scanning';
-  const isSyncing = status === 'syncing';
-  const allDone = Array.from(syncProgress.values()).every((p) => p.status === 'done');
-  const hasData = Array.from(syncProgress.values()).some((p) => (p.count ?? 0) > 0);
 
   const handleScan = () => isScanning ? wearableStore.stopScan() : wearableStore.scan();
   const handleConnect = async (id: string) => {
@@ -44,26 +51,29 @@ export default function WearableModule() {
     if (!ok) toast.error('Falha ao conectar ao dispositivo');
   };
   const handleDisconnect = () => wearableStore.disconnect();
-  const handleSync = () => wearableStore.sync();
-  const handleFlush = async () => {
-    const result = await flushSamplesToBackend();
-    if (result) {
-      toast.success(`${result.inserted} amostras enviadas, ${result.duplicates} duplicatas ignoradas`);
-    } else {
-      toast.error('Nenhuma amostra para enviar');
-    }
-  };
+
+  const modelLabel = selectedModel === 'J5Vital' ? 'J-Style J5Vital' : 'J-Style Ring X3';
+  const modelIcon = selectedModel === 'J5Vital' ? Watch : Bluetooth;
+  const ModelIcon = modelIcon;
 
   return (
     <div className="space-y-4">
+      {/* --- Model Picker --- */}
+      {!connectedDevice && (
+        <WearableModelPicker
+          selected={selectedModel}
+          onSelect={(m) => wearableStore.selectModel(m)}
+        />
+      )}
+
       {/* --- Scanner / Connection --- */}
       <div className="rounded-2xl bg-card border border-border p-4 space-y-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-            <Bluetooth size={20} className="text-primary" />
+            <ModelIcon size={20} className="text-primary" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-foreground">J-Style Ring X3</h3>
+            <h3 className="text-sm font-semibold text-foreground">{modelLabel}</h3>
             <p className="text-xs text-muted-foreground">
               {connectedDevice
                 ? `Conectado: ${connectedDevice.name}`
@@ -85,12 +95,12 @@ export default function WearableModule() {
           </p>
         )}
 
-        {/* Permissions hint (iOS) */}
+        {/* Permissions hint */}
         {!connectedDevice && !isScanning && (
           <div className="flex items-start gap-2 rounded-xl bg-muted/50 p-3">
             <Info size={14} className="text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Para conectar o anel, o app precisará de permissão Bluetooth. No iOS, aceite a solicitação quando aparecer.
+              Para conectar o dispositivo, o app precisará de permissão Bluetooth. No iOS, aceite a solicitação quando aparecer.
             </p>
           </div>
         )}
@@ -142,68 +152,10 @@ export default function WearableModule() {
       </div>
 
       {/* --- Sync Panel --- */}
-      {connectedDevice && (
-        <div className="rounded-2xl bg-card border border-border p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Sincronização</h3>
-
-          {syncProgress.size > 0 && (
-            <div className="space-y-1.5">
-              {Array.from(syncProgress.entries()).map(([type, prog]) => (
-                <div key={type} className="flex items-center gap-2">
-                  {prog.status === 'syncing' && <Loader2 size={14} className="animate-spin text-primary" />}
-                  {prog.status === 'done' && <Check size={14} className="text-primary" />}
-                  {prog.status === 'error' && <AlertCircle size={14} className="text-destructive" />}
-                  {prog.status === 'pending' && <div className="w-3.5 h-3.5 rounded-full border border-border" />}
-                  <span className="text-xs text-foreground flex-1">{BIOMARKER_LABELS[type]}</span>
-                  {prog.count != null && prog.count > 0 && (
-                    <span className="text-[10px] text-muted-foreground">{prog.count}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleSync}
-              disabled={isSyncing}
-              className="flex-1 rounded-xl border border-border py-2.5 text-xs font-medium text-foreground flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
-              {isSyncing ? 'Sincronizando…' : 'Sincronizar agora'}
-            </button>
-
-            {allDone && hasData && (
-              <button
-                onClick={handleFlush}
-                className="rounded-xl bg-primary text-primary-foreground px-4 py-2.5 text-xs font-medium active:scale-[0.98]"
-              >
-                Enviar
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {connectedDevice && <WearableSyncPanel />}
 
       {/* --- Diagnostics (debug only) --- */}
-      {isDebugEnabled() && diagnostics && (
-        <div className="rounded-2xl bg-card border border-border p-4 space-y-2">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Diagnósticos (DEBUG)</h3>
-          {[
-            { label: 'Device UID', value: diagnostics.deviceId },
-            { label: 'MAC', value: diagnostics.mac ?? '—' },
-            { label: 'Firmware', value: diagnostics.fwVersion ?? '—' },
-            { label: 'Bateria', value: diagnostics.battery != null ? `${diagnostics.battery}%` : '—' },
-            { label: 'Último erro', value: diagnostics.lastError ?? 'Nenhum' },
-            { label: 'Último sync', value: lastSyncAt ?? '—' },
-          ].map((r) => (
-            <div key={r.label} className="flex justify-between text-xs">
-              <span className="text-muted-foreground">{r.label}</span>
-              <span className="text-foreground font-mono text-[11px]">{r.value}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {isDebugEnabled() && <WearableDiagnostics />}
     </div>
   );
 }

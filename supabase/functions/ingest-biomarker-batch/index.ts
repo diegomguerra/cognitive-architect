@@ -30,6 +30,17 @@ async function computeRawHash(
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Allowed biomarker types (core + V5 extended) */
+const ALLOWED_TYPES = new Set([
+  // Core (X3 + J5Vital)
+  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr',
+  // V5 extended
+  'ecg_history', 'ecg_raw', 'ppg', 'ppi', 'rr_interval',
+]);
+
+/** Max payload_json size per sample (bytes) — prevents ECG raw floods */
+const MAX_SAMPLE_PAYLOAD_BYTES = 256 * 1024; // 256 KB
+
 interface SampleInput {
   type: string;
   ts: string;
@@ -84,9 +95,31 @@ Deno.serve(async (req) => {
   if (!deviceUid) return json({ error: "device_uid is required" }, 400);
   if (!model) return json({ error: "model is required" }, 400);
   if (samples.length === 0) return json({ error: "samples array is required and must not be empty" }, 400);
-  if (samples.length > 500) return json({ error: "Max 500 samples per batch" }, 400);
+  if (samples.length > 1000) return json({ error: "Max 1000 samples per batch" }, 400);
 
-  // 3. Upsert device
+  // 3. Validate sample types
+  const invalidTypes = samples.filter((s) => !ALLOWED_TYPES.has(s.type)).map((s) => s.type);
+  if (invalidTypes.length > 0) {
+    return json({ error: `Invalid sample types: ${[...new Set(invalidTypes)].join(', ')}` }, 400);
+  }
+
+  // 4. Check individual payload sizes
+  const oversized: number[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    const pj = samples[i].payload_json ?? samples[i].payload;
+    if (pj) {
+      const size = new TextEncoder().encode(JSON.stringify(pj)).length;
+      if (size > MAX_SAMPLE_PAYLOAD_BYTES) oversized.push(i);
+    }
+  }
+  if (oversized.length > 0) {
+    return json({
+      error: `${oversized.length} sample(s) exceed max payload size of ${MAX_SAMPLE_PAYLOAD_BYTES} bytes`,
+      oversized_indices: oversized,
+    }, 400);
+  }
+
+  // 5. Upsert device
   const { data: deviceData, error: deviceErr } = await supabase
     .from("devices")
     .upsert(
@@ -108,14 +141,14 @@ Deno.serve(async (req) => {
   }
   const deviceId = deviceData.id;
 
-  // 4. Build rows with hashes
+  // 6. Build rows with hashes
   let inserted = 0;
   let duplicates = 0;
   let errors = 0;
   const typesIngested = new Set<string>();
 
   const requestId = `req-${Date.now()}`;
-  console.log(`[ingest][${requestId}] user=${userId} device=${deviceUid} samples=${samples.length}`);
+  console.log(`[ingest][${requestId}] user=${userId} device=${deviceUid} model=${model} samples=${samples.length}`);
 
   const rows = await Promise.all(
     samples.map(async (s) => {
@@ -142,8 +175,7 @@ Deno.serve(async (req) => {
     }),
   );
 
-  // 5. Bulk upsert — skip duplicates via ON CONFLICT DO NOTHING semantics
-  // We insert in chunks to avoid payload limits
+  // 7. Bulk upsert in chunks
   const CHUNK_SIZE = 50;
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -162,7 +194,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 6. Update sync state
+  // 8. Update sync state
   const cursorByType: Record<string, string> = {};
   for (const t of typesIngested) {
     const latestSample = rows
