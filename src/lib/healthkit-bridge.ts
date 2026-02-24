@@ -3,6 +3,7 @@ import { registerPlugin } from '@capacitor/core';
 export type BridgeAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sharingAuthorized' | 'unknown';
 
 export interface VYRHealthBridgePlugin {
+  isHealthKitAvailable(): Promise<{ available: boolean }>;
   writeBodyTemperature(options: { value: number; startDate: string; endDate?: string }): Promise<{ success: boolean }>;
   writeBloodPressure(options: { systolic: number; diastolic: number; startDate: string; endDate?: string }): Promise<{ success: boolean }>;
   writeVO2Max(options: { value: number; startDate: string; endDate?: string }): Promise<{ success: boolean }>;

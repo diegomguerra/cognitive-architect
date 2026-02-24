@@ -65,9 +65,14 @@ export async function isHealthKitAvailable(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
     const result = await Health.isAvailable();
+    console.log('[healthkit] isAvailable result:', JSON.stringify(result));
     return result.available;
-  } catch {
-    return false;
+  } catch (e) {
+    console.error('[healthkit] isAvailable THREW:', e);
+    // Fallback: se é iOS nativo, assume disponível e deixa o requestAuthorization decidir
+    const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+    console.log('[healthkit] isNativePlatform fallback:', isNative);
+    return isNative;
   }
 }
 
