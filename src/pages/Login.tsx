@@ -39,27 +39,29 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-dvh flex flex-col items-center justify-center px-5" style={{ background: '#0d1117' }}>
-      {/* Header with brain icon */}
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
-          <img
-            src={brainIcon}
-            alt="VYR"
-            className="w-full h-full object-cover"
-            style={{ filter: 'grayscale(80%) brightness(0.9) contrast(1.1)', opacity: 0.85 }}
-          />
-        </div>
-        <div>
-          <h1 className="font-mono font-bold tracking-wide text-sm" style={{ color: '#c9d1d9' }}>
-            VYR  App
-          </h1>
-          <p className="font-mono text-xs" style={{ color: '#6b7b8d' }}>
-            Performance cognitiva
-          </p>
+    <div className="min-h-dvh flex flex-col items-center px-5 pt-14 pb-10" style={{ background: '#0d1117' }}>
+      {/* Header */}
+      <div className="w-full max-w-sm flex items-center justify-between mb-10">
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl overflow-hidden flex-shrink-0">
+            <img
+              src={brainIcon}
+              alt="VYR"
+              className="w-full h-full object-cover"
+              style={{ filter: 'grayscale(80%) brightness(0.9) contrast(1.1)', opacity: 0.85 }}
+            />
+          </div>
+          <div>
+            <h1 className="font-mono font-bold tracking-wide text-lg" style={{ color: '#c9d1d9' }}>
+              VYR  App
+            </h1>
+            <p className="font-mono text-sm" style={{ color: '#6b7b8d' }}>
+              Performance cognitiva
+            </p>
+          </div>
         </div>
         <span
-          className="ml-3 border rounded px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] font-mono"
+          className="border rounded px-3 py-1 text-[10px] uppercase tracking-[0.3em] font-mono self-start mt-1"
           style={{ borderColor: '#2a3441', color: '#6b7b8d' }}
         >
           secure
@@ -68,54 +70,54 @@ const Login = () => {
 
       {/* Card */}
       <div
-        className="w-full max-w-sm rounded-2xl p-6 sm:p-8"
+        className="w-full max-w-sm rounded-2xl p-7 sm:p-9"
         style={{ background: '#161b22', border: '1px solid #21262d' }}
       >
-        <h2 className="text-xl font-semibold mb-1" style={{ color: '#c9d1d9' }}>
+        <h2 className="text-2xl font-bold mb-1" style={{ color: '#c9d1d9' }}>
           {isSignUp ? 'Criar conta' : 'Entrar'}
         </h2>
-        <p className="text-sm mb-6" style={{ color: '#6b7b8d' }}>
+        <p className="text-sm font-mono mb-7" style={{ color: '#6b7b8d' }}>
           {isSignUp ? 'Crie sua conta VYR' : 'Acesse sua conta'}
         </p>
 
         {/* OAuth buttons */}
-        <div className="space-y-3 mb-5">
+        <div className="space-y-3 mb-6">
           <button
             onClick={() => handleOAuth('google')}
-            className="w-full flex items-center justify-center gap-3 rounded-xl px-4 py-3 text-xs transition-transform active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-3 rounded-xl px-4 py-4 text-sm font-medium transition-transform active:scale-[0.98]"
             style={{ background: '#0d1117', border: '1px solid #21262d', color: '#8b949e' }}
           >
-            <span className="text-base font-bold" style={{ color: '#8b949e' }}>G</span>
+            <span className="text-lg font-bold" style={{ color: '#8b949e' }}>G</span>
             Continuar com Google
           </button>
           <button
             onClick={() => handleOAuth('apple')}
-            className="w-full flex items-center justify-center gap-3 rounded-xl px-4 py-3 text-sm transition-transform active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-3 rounded-xl px-4 py-4 text-sm font-medium transition-transform active:scale-[0.98]"
             style={{ background: '#0d1117', border: '1px solid #21262d', color: '#8b949e' }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#8b949e"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="#8b949e"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
             Continuar com Apple
           </button>
         </div>
 
         {/* Divider */}
-        <div className="flex items-center gap-3 mb-5">
+        <div className="flex items-center gap-4 mb-7">
           <div className="flex-1 h-px" style={{ background: '#21262d' }} />
-          <span className="text-xs uppercase" style={{ color: '#6b7b8d' }}>ou</span>
+          <span className="text-xs uppercase tracking-wider font-mono" style={{ color: '#6b7b8d' }}>ou</span>
           <div className="flex-1 h-px" style={{ background: '#21262d' }} />
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="text-sm font-medium mb-1.5 block" style={{ color: '#c9d1d9' }}>Email</label>
+            <label className="text-sm font-semibold mb-2 block" style={{ color: '#c9d1d9' }}>Email</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="seu@email.com"
               required
-              className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-colors"
+              className="w-full rounded-xl px-4 py-4 text-sm outline-none transition-colors"
               style={{
                 background: '#0d1117',
                 border: '1px solid #21262d',
@@ -124,13 +126,13 @@ const Login = () => {
             />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-sm font-medium" style={{ color: '#c9d1d9' }}>Senha</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-semibold" style={{ color: '#c9d1d9' }}>Senha</label>
               {!isSignUp && (
                 <button
                   type="button"
                   onClick={() => navigate('/forgot-password')}
-                  className="text-xs hover:underline"
+                  className="text-sm hover:underline"
                   style={{ color: '#6b7b8d' }}
                 >
                   Esqueci minha senha
@@ -145,7 +147,7 @@ const Login = () => {
                 placeholder="••••••••"
                 required
                 minLength={6}
-                className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-colors pr-10"
+                className="w-full rounded-xl px-4 py-4 text-sm outline-none transition-colors pr-10"
                 style={{
                   background: '#0d1117',
                   border: '1px solid #21262d',
@@ -165,18 +167,17 @@ const Login = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 mt-2 disabled:opacity-50"
+            className="w-full rounded-xl font-semibold py-4 text-base transition-all active:scale-[0.98] hover:opacity-90 mt-3 disabled:opacity-50"
             style={{
-              background: 'linear-gradient(135deg, #1a3a5c, #2a4a6c)',
-              border: '1px solid #2a4a6c',
-              color: '#c9d1d9',
+              background: '#e6edf3',
+              color: '#0d1117',
             }}
           >
             {loading ? 'Aguarde...' : isSignUp ? 'Criar conta' : 'Entrar'}
           </button>
         </form>
 
-        <p className="text-center text-sm mt-5" style={{ color: '#6b7b8d' }}>
+        <p className="text-center text-sm mt-6" style={{ color: '#6b7b8d' }}>
           {isSignUp ? 'Já tem conta? ' : 'Não tem conta? '}
           <button onClick={() => setIsSignUp(!isSignUp)} className="hover:underline" style={{ color: '#8b949e' }}>
             {isSignUp ? 'Entrar' : 'Criar'}
@@ -184,8 +185,8 @@ const Login = () => {
         </p>
       </div>
 
-      <p className="font-mono text-[10px] mt-8 text-center" style={{ color: '#3a4450' }}>
-        Clareza mental é construída com consistência
+      <p className="font-mono text-xs mt-10 text-center" style={{ color: '#3a4450' }}>
+        Clareza mental é construída com consistência.
       </p>
     </div>
   );
