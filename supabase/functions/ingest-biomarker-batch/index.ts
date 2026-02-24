@@ -20,16 +20,14 @@ async function computeRawHash(
   deviceUid: string,
   type: string,
   ts: string,
+  endTs: string | null,
   value: number | null,
+  payloadJson: Record<string, unknown> | null,
 ): Promise<string> {
-  const input = `${userId}|${deviceUid}|${type}|${ts}|${value ?? ""}`;
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(input),
-  );
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  const payloadStr = payloadJson ? JSON.stringify(payloadJson, Object.keys(payloadJson).sort()) : '';
+  const input = `${userId}|${deviceUid}|${type}|${ts}|${endTs ?? ''}|${value ?? ''}|${payloadStr}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 interface SampleInput {
@@ -38,6 +36,7 @@ interface SampleInput {
   end_ts?: string;
   value?: number | null;
   payload_json?: Record<string, unknown>;
+  payload?: Record<string, unknown>; // alias accepted
   source?: string;
 }
 
@@ -115,6 +114,9 @@ Deno.serve(async (req) => {
   let errors = 0;
   const typesIngested = new Set<string>();
 
+  const requestId = `req-${Date.now()}`;
+  console.log(`[ingest][${requestId}] user=${userId} device=${deviceUid} samples=${samples.length}`);
+
   const rows = await Promise.all(
     samples.map(async (s) => {
       const rawHash = await computeRawHash(
@@ -122,7 +124,9 @@ Deno.serve(async (req) => {
         deviceUid,
         s.type,
         s.ts,
+        s.end_ts ?? null,
         s.value ?? null,
+        s.payload_json ?? null,
       );
       return {
         user_id: userId,
@@ -131,7 +135,7 @@ Deno.serve(async (req) => {
         ts: s.ts,
         end_ts: s.end_ts ?? null,
         value: s.value ?? null,
-        payload_json: s.payload_json ?? null,
+        payload_json: s.payload_json ?? s.payload ?? null,
         source: s.source ?? "jstyle",
         raw_hash: rawHash,
       };
@@ -178,6 +182,8 @@ Deno.serve(async (req) => {
     },
     { onConflict: "user_id,device_id" },
   );
+
+  console.log(`[ingest][${requestId}] done inserted=${inserted} duplicates=${duplicates} errors=${errors} types=${Array.from(typesIngested).join(',')}`);
 
   return json({
     success: true,
