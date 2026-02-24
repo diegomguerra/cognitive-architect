@@ -210,10 +210,12 @@ export function useVYRStore() {
         return result;
       }, { table: 'user_integrations', operation: 'upsert' });
       await enableHealthKitBackgroundSync();
+      // Trigger first sync immediately after connecting
+      const syncOk = await runIncrementalHealthSync('manual');
       setWearableConnection({
         provider: 'apple_health',
         status: 'active',
-        lastSyncAt: null,
+        lastSyncAt: syncOk ? new Date().toISOString() : null,
         scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
       });
     }

@@ -217,7 +217,7 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
     }
 
     if (!changed && trigger === 'observer') return true;
-    return await syncHealthKitData();
+    return await _syncHealthKitDataInternal();
   } catch (error) {
     console.error('[healthkit] incremental sync failed', error);
     return false;
@@ -234,66 +234,71 @@ export async function syncHealthKitData(): Promise<boolean> {
   syncLock = true;
 
   try {
-    const available = await isHealthKitAvailable();
-    if (!available) return false;
-
-    const userId = await requireValidUserId();
-    const { Health } = await import('@capgo/capacitor-health');
-    const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const today = now.toISOString().split('T')[0];
-    const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
-    const empty = { samples: [] as HealthSample[] };
-
-    const [rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] = await Promise.all([
-      Health.readSamples({ ...queryOpts, dataType: 'restingHeartRate' }).catch(() => empty),
-      Health.readSamples({ ...queryOpts, dataType: 'heartRateVariability' }).catch(() => empty),
-      Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
-      Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
-      Health.readSamples({ ...queryOpts, dataType: 'oxygenSaturation' }).catch(() => empty),
-      Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
-    ]);
-
-    const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
-    const avgHrv = hrvData.samples.length > 0 ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length : undefined;
-    const avgRhr = rhrData.samples.length > 0 ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length : undefined;
-    const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
-    const avgSpo2 = spo2Data.samples.length > 0 ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length : undefined;
-    const avgRR = rrData.samples.length > 0 ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length : undefined;
-
-    const metrics = {
-      rhr: avgRhr ? Math.round(avgRhr) : null,
-      hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
-      hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
-      sleep_duration_hours: Math.round(durationHours * 10) / 10,
-      sleep_quality: sleepQuality,
-      steps: totalSteps,
-      spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
-      respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
-    };
-
-    const result = await retryOnAuthErrorLabeled(async () => {
-      const res = await supabase.from('ring_daily_data').upsert([{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }], { onConflict: 'user_id,day,source_provider' }).select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
-    }, { table: 'ring_daily_data', operation: 'upsert' });
-
-    if (result.error) return false;
-
-    await retryOnAuthErrorLabeled(async () => {
-      const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'connected', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
-      return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
-    }, { table: 'user_integrations', operation: 'upsert' });
-
-    const nowIso = now.toISOString();
-    for (const dt of HEALTH_READ_TYPES) {
-      setLastSyncTimestamp(dt, nowIso);
-    }
-
-    return true;
+    return await _syncHealthKitDataInternal();
   } catch (e) {
     console.error('[healthkit] sync exception:', e);
     return false;
   } finally {
     syncLock = false;
   }
+}
+
+/** Internal sync logic — callers must hold syncLock */
+async function _syncHealthKitDataInternal(): Promise<boolean> {
+  const available = await isHealthKitAvailable();
+  if (!available) return false;
+
+  const userId = await requireValidUserId();
+  const { Health } = await import('@capgo/capacitor-health');
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const today = now.toISOString().split('T')[0];
+  const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
+  const empty = { samples: [] as HealthSample[] };
+
+  const [rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] = await Promise.all([
+    Health.readSamples({ ...queryOpts, dataType: 'restingHeartRate' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'heartRateVariability' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'oxygenSaturation' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
+  ]);
+
+  const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
+  const avgHrv = hrvData.samples.length > 0 ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length : undefined;
+  const avgRhr = rhrData.samples.length > 0 ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length : undefined;
+  const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
+  const avgSpo2 = spo2Data.samples.length > 0 ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length : undefined;
+  const avgRR = rrData.samples.length > 0 ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length : undefined;
+
+  const metrics = {
+    rhr: avgRhr ? Math.round(avgRhr) : null,
+    hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+    hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
+    sleep_duration_hours: Math.round(durationHours * 10) / 10,
+    sleep_quality: sleepQuality,
+    steps: totalSteps,
+    spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
+    respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
+  };
+
+  const result = await retryOnAuthErrorLabeled(async () => {
+    const res = await supabase.from('ring_daily_data').upsert([{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }], { onConflict: 'user_id,day,source_provider' }).select();
+    return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
+  }, { table: 'ring_daily_data', operation: 'upsert' });
+
+  if (result.error) return false;
+
+  await retryOnAuthErrorLabeled(async () => {
+    const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'connected', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
+    return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
+  }, { table: 'user_integrations', operation: 'upsert' });
+
+  const nowIso = now.toISOString();
+  for (const dt of HEALTH_READ_TYPES) {
+    setLastSyncTimestamp(dt, nowIso);
+  }
+
+  return true;
 }

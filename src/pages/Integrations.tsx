@@ -6,6 +6,7 @@ import BottomNav from '@/components/BottomNav';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
 import WearableModule from '@/wearables/jstyle/WearableModule';
+import BiomarkerDataCard from '@/components/BiomarkerDataCard';
 
 const dataTypes = [
   { label: 'Frequência Cardíaca', key: 'heartRate' },
@@ -120,6 +121,9 @@ const IntegrationsPage = () => {
             </button>
           )}
         </div>
+
+        {/* Biomarker data */}
+        {isConnected && <BiomarkerDataCard />}
 
         {/* J-Style Ring X3 */}
         <WearableModule />
