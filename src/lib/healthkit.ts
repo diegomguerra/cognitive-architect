@@ -9,24 +9,26 @@ import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 
-// Types the plugin supports natively
+// Types the @capgo/capacitor-health plugin actually supports
 export const HEALTH_READ_TYPES: HealthDataType[] = [
-  'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'respiratoryRate',
+  'heartRate', 'sleep', 'steps',
 ];
 export const HEALTH_WRITE_TYPES: HealthDataType[] = [
-  'steps', 'heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'oxygenSaturation', 'respiratoryRate',
+  'steps', 'heartRate', 'sleep',
 ];
 
-// Types handled exclusively by the Swift bridge (not in HealthDataType union)
-export const BRIDGE_ONLY_READ_TYPES = [
-  'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+// Types read via VYRHealthBridge.readAnchored (not supported by @capgo plugin)
+export const BRIDGE_READ_TYPES = [
+  'restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate',
 ] as const;
+
+// Types handled exclusively by the Swift bridge for writes
 export const BRIDGE_ONLY_WRITE_TYPES = [
   'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
 ] as const;
 
 // All types for background delivery (plugin + bridge)
-const ALL_SYNC_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_ONLY_READ_TYPES.filter(t => !HEALTH_READ_TYPES.includes(t as any))];
+const ALL_SYNC_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES.filter(t => !BRIDGE_READ_TYPES.includes(t as any))];
 
 const ANCHOR_PREFIX = 'healthkit.anchor.';
 const SYNC_DEBOUNCE_MS = 1500;
@@ -80,11 +82,11 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
     const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
-    const beforeStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_ONLY_READ_TYPES]);
+    const beforeStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
 
     await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
 
-    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_ONLY_READ_TYPES]);
+    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
     const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
     const deniedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingDenied' || s === 'notDetermined').map(([t]) => t);
 
@@ -260,22 +262,41 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const today = now.toISOString().split('T')[0];
   const queryOpts = { startDate: yesterday.toISOString(), endDate: now.toISOString(), limit: 500 };
   const empty = { samples: [] as HealthSample[] };
+  const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
-  const [rhrData, hrvData, sleepData, stepsData, spo2Data, rrData] = await Promise.all([
-    Health.readSamples({ ...queryOpts, dataType: 'restingHeartRate' }).catch(() => empty),
-    Health.readSamples({ ...queryOpts, dataType: 'heartRateVariability' }).catch(() => empty),
+  // @capgo/capacitor-health: only steps & sleep
+  // VYRHealthBridge.readAnchored: rhr, hrv, spo2, respiratoryRate
+  const [sleepData, stepsData, rhrBridge, hrvBridge, spo2Bridge, rrBridge] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
-    Health.readSamples({ ...queryOpts, dataType: 'oxygenSaturation' }).catch(() => empty),
-    Health.readSamples({ ...queryOpts, dataType: 'respiratoryRate' }).catch(() => empty),
+    VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'respiratoryRate', limit: 500 }).catch(() => emptyBridge),
   ]);
 
+  console.info('[healthkit] sync samples count', {
+    sleep: sleepData.samples.length,
+    steps: stepsData.samples.length,
+    rhr: rhrBridge.samples.length,
+    hrv: hrvBridge.samples.length,
+    spo2: spo2Bridge.samples.length,
+    rr: rrBridge.samples.length,
+  });
+
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
-  const avgHrv = hrvData.samples.length > 0 ? hrvData.samples.reduce((sum: number, s) => sum + s.value, 0) / hrvData.samples.length : undefined;
-  const avgRhr = rhrData.samples.length > 0 ? rhrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rhrData.samples.length : undefined;
   const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
-  const avgSpo2 = spo2Data.samples.length > 0 ? spo2Data.samples.reduce((sum: number, s) => sum + s.value, 0) / spo2Data.samples.length : undefined;
-  const avgRR = rrData.samples.length > 0 ? rrData.samples.reduce((sum: number, s) => sum + s.value, 0) / rrData.samples.length : undefined;
+
+  // Bridge samples: value is a number from serialize()
+  const bridgeAvg = (samples: Array<Record<string, unknown>>): number | undefined => {
+    const vals = samples.map(s => Number(s.value)).filter(v => !isNaN(v) && v > 0);
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
+  };
+
+  const avgRhr = bridgeAvg(rhrBridge.samples);
+  const avgHrv = bridgeAvg(hrvBridge.samples);
+  const avgSpo2 = bridgeAvg(spo2Bridge.samples);
+  const avgRR = bridgeAvg(rrBridge.samples);
 
   const metrics = {
     rhr: avgRhr ? Math.round(avgRhr) : null,
@@ -301,7 +322,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   }, { table: 'user_integrations', operation: 'upsert' });
 
   const nowIso = now.toISOString();
-  for (const dt of HEALTH_READ_TYPES) {
+  for (const dt of [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES]) {
     setLastSyncTimestamp(dt, nowIso);
   }
 

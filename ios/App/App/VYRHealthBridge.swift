@@ -254,7 +254,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         ]
 
         if let q = sample as? HKQuantitySample {
-            data["value"] = q.quantity.doubleValue(for: HKUnit.count())
+            data["value"] = unitAwareValue(for: q)
         }
 
         if let c = sample as? HKCategorySample {
@@ -262,5 +262,33 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
 
         return data
+    }
+
+    private func unitAwareValue(for sample: HKQuantitySample) -> Double {
+        let id = sample.quantityType
+        switch id {
+        case HKQuantityType.quantityType(forIdentifier: .heartRate),
+             HKQuantityType.quantityType(forIdentifier: .restingHeartRate):
+            return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
+        case HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN):
+            return sample.quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
+        case HKQuantityType.quantityType(forIdentifier: .oxygenSaturation):
+            return sample.quantity.doubleValue(for: HKUnit.percent())
+        case HKQuantityType.quantityType(forIdentifier: .respiratoryRate):
+            return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
+        case HKQuantityType.quantityType(forIdentifier: .bodyTemperature):
+            return sample.quantity.doubleValue(for: HKUnit.degreeCelsius())
+        case HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
+             HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic):
+            return sample.quantity.doubleValue(for: HKUnit.millimeterOfMercury())
+        case HKQuantityType.quantityType(forIdentifier: .vo2Max):
+            return sample.quantity.doubleValue(for: HKUnit(from: "mL/kg*min"))
+        case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
+            return sample.quantity.doubleValue(for: HKUnit.kilocalorie())
+        case HKQuantityType.quantityType(forIdentifier: .stepCount):
+            return sample.quantity.doubleValue(for: HKUnit.count())
+        default:
+            return sample.quantity.doubleValue(for: HKUnit.count())
+        }
     }
 }
