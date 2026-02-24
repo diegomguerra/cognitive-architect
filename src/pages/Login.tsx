@@ -48,7 +48,7 @@ const Login = () => {
               src={brainIcon}
               alt="VYR"
               className="w-full h-full object-cover"
-              style={{ filter: 'grayscale(80%) brightness(0.9) contrast(1.1)', opacity: 0.85 }}
+              style={{ filter: 'grayscale(100%) brightness(1.2) contrast(1.8)', opacity: 1 }}
             />
           </div>
           <div>
