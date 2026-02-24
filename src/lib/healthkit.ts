@@ -200,6 +200,11 @@ export async function enableHealthKitBackgroundSync(): Promise<void> {
 }
 
 export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 'manual'): Promise<boolean> {
+  const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+  if (!isNative) {
+    console.warn('[healthkit] skipping sync on web platform');
+    return false;
+  }
   if (syncLock) return false;
 
   if (syncDebounce) clearTimeout(syncDebounce);
