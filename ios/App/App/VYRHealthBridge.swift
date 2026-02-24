@@ -7,6 +7,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "VYRHealthBridge"
     public let jsName = "VYRHealthBridge"
     public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "isHealthKitAvailable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeBodyTemperature", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeBloodPressure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "writeVO2Max", returnType: CAPPluginReturnPromise),
@@ -63,6 +64,10 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             return nil
         }
         return data.base64EncodedString()
+    }
+
+    @objc func isHealthKitAvailable(_ call: CAPPluginCall) {
+        call.resolve(["available": HKHealthStore.isHealthDataAvailable()])
     }
 
     @objc func writeBodyTemperature(_ call: CAPPluginCall) {
