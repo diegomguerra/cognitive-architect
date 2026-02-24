@@ -1,4 +1,6 @@
-/** Wearable device discovered during BLE scan */
+/** Wearable types — production contract */
+
+/** Device discovered during BLE scan */
 export interface WearableDevice {
   deviceId: string;
   name: string;
@@ -9,7 +11,7 @@ export interface WearableDevice {
 }
 
 /** Connection status */
-export type WearableConnectionStatus =
+export type WearableStatus =
   | 'idle'
   | 'scanning'
   | 'connected'
@@ -17,33 +19,33 @@ export type WearableConnectionStatus =
   | 'disconnected'
   | 'error';
 
-/** Biomarker types supported by J-Style X3 */
+/** Supported biomarker types */
 export type BiomarkerType =
   | 'sleep'
   | 'hrv'
   | 'spo2'
-  | 'temperature'
+  | 'temp'
   | 'steps'
-  | 'heartRate';
+  | 'hr';
 
-/** Single biomarker sample from device */
+/** Single biomarker sample */
 export interface BiomarkerSample {
   type: BiomarkerType;
-  ts: string; // ISO 8601
-  end_ts?: string;
+  ts: string;
+  end_ts?: string | null;
   value?: number | null;
-  payload_json?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
   source?: string;
 }
 
-/** Sync progress for a specific type */
+/** Sync progress per biomarker type */
 export interface SyncProgress {
   type: BiomarkerType;
   status: 'pending' | 'syncing' | 'done' | 'error';
   count?: number;
 }
 
-/** Device diagnostic info */
+/** Device diagnostics */
 export interface DeviceDiagnostics {
   deviceId: string;
   mac?: string;
@@ -53,7 +55,7 @@ export interface DeviceDiagnostics {
   lastSync?: string;
 }
 
-/** Events emitted by the wearable adapter */
+/** Wearable event signatures */
 export interface WearableEvents {
   onDeviceFound: (device: WearableDevice) => void;
   onConnected: (device: WearableDevice) => void;
@@ -62,7 +64,7 @@ export interface WearableEvents {
   onError: (code: string, message: string) => void;
 }
 
-/** Wearable adapter interface — the contract for any wearable plugin */
+/** Adapter contract — any wearable plugin must implement this */
 export interface WearableAdapter {
   scan(): Promise<void>;
   stopScan(): Promise<void>;
@@ -72,22 +74,20 @@ export interface WearableAdapter {
   enableRealtime(type: BiomarkerType): Promise<void>;
   getDiagnostics(): DeviceDiagnostics | null;
   isAvailable(): Promise<boolean>;
-
-  // Event registration
   on<K extends keyof WearableEvents>(event: K, handler: WearableEvents[K]): void;
   off<K extends keyof WearableEvents>(event: K, handler: WearableEvents[K]): void;
 }
 
-/** Batch payload sent to edge function */
+/** Batch ingest payload */
 export interface IngestBatchPayload {
-  device_uid: string;
+  vendor: string;
   model: string;
-  vendor?: string;
-  fw_version?: string;
+  device_uid: string;
+  fw_version?: string | null;
   samples: BiomarkerSample[];
 }
 
-/** Response from ingest edge function */
+/** Ingest response */
 export interface IngestBatchResponse {
   success: boolean;
   device_id?: string;

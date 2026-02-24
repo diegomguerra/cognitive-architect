@@ -1,6 +1,6 @@
 /**
- * JStyleAdapter — Adapter for J-Style X3 ring.
- * Communicates with native Capacitor plugin (to be implemented separately).
+ * JStyleAdapter — Production adapter for J-Style X3 ring.
+ * Delegates ALL BLE to native Capacitor plugin `JStylePlugin`.
  * The front-end NEVER touches BLE directly.
  */
 
@@ -11,19 +11,10 @@ import type {
   BiomarkerType,
   BiomarkerSample,
   DeviceDiagnostics,
-} from './types';
+} from './wearable.types';
 
-type EventMap = {
-  [K in keyof WearableEvents]: Set<WearableEvents[K]>;
-};
+type EventMap = { [K in keyof WearableEvents]: Set<WearableEvents[K]> };
 
-/**
- * Stub adapter that delegates to a native Capacitor plugin.
- * In the browser (non-native), all methods return graceful fallbacks.
- * 
- * The native plugin should be registered as `JStylePlugin` on the Capacitor bridge
- * and mirror the WearableAdapter interface.
- */
 export class JStyleAdapter implements WearableAdapter {
   private events: EventMap = {
     onDeviceFound: new Set(),
@@ -34,10 +25,9 @@ export class JStyleAdapter implements WearableAdapter {
   };
 
   private connectedDevice: WearableDevice | null = null;
-  private diagnostics: DeviceDiagnostics | null = null;
+  private _diagnostics: DeviceDiagnostics | null = null;
 
   private get plugin(): any {
-    // Capacitor plugin will be available as (window as any).Capacitor?.Plugins?.JStylePlugin
     return (window as any).Capacitor?.Plugins?.JStylePlugin ?? null;
   }
 
@@ -48,8 +38,8 @@ export class JStyleAdapter implements WearableAdapter {
   async isAvailable(): Promise<boolean> {
     if (!this.isNative) return false;
     try {
-      const result = await this.plugin?.isAvailable();
-      return result?.available === true;
+      const r = await this.plugin?.isAvailable();
+      return r?.available === true;
     } catch {
       return false;
     }
@@ -57,13 +47,12 @@ export class JStyleAdapter implements WearableAdapter {
 
   async scan(): Promise<void> {
     if (!this.isNative) {
-      this.emit('onError', 'NOT_NATIVE', 'BLE scan only available on native device');
+      this.emit('onError', 'NOT_NATIVE', 'BLE scan requires native device');
       return;
     }
     try {
-      // Register listener for discovered devices
-      this.plugin?.addListener?.('deviceFound', (device: WearableDevice) => {
-        this.emit('onDeviceFound', device);
+      this.plugin?.addListener?.('deviceFound', (d: WearableDevice) => {
+        this.emit('onDeviceFound', d);
       });
       await this.plugin?.startScan();
     } catch (e: any) {
@@ -72,32 +61,26 @@ export class JStyleAdapter implements WearableAdapter {
   }
 
   async stopScan(): Promise<void> {
-    try {
-      await this.plugin?.stopScan();
-    } catch {
-      // silent
-    }
+    try { await this.plugin?.stopScan(); } catch { /* silent */ }
   }
 
   async connect(deviceId: string): Promise<boolean> {
     if (!this.isNative) return false;
     try {
-      const result = await this.plugin?.connect({ deviceId });
-      if (result?.connected) {
+      const r = await this.plugin?.connect({ deviceId });
+      if (r?.connected) {
         this.connectedDevice = {
           deviceId,
-          name: result.name ?? 'J-Style X3',
+          name: r.name ?? 'J-Style X3',
           vendor: 'jstyle',
-          model: result.model ?? 'X3',
-          mac: result.mac,
+          model: r.model ?? 'X3',
+          mac: r.mac,
         };
-        this.diagnostics = {
+        this._diagnostics = {
           deviceId,
-          mac: result.mac,
-          fwVersion: result.fwVersion,
-          battery: result.battery,
-          lastError: undefined,
-          lastSync: undefined,
+          mac: r.mac,
+          fwVersion: r.fwVersion,
+          battery: r.battery,
         };
         this.emit('onConnected', this.connectedDevice);
         return true;
@@ -110,11 +93,7 @@ export class JStyleAdapter implements WearableAdapter {
   }
 
   async disconnect(): Promise<void> {
-    try {
-      await this.plugin?.disconnect();
-    } catch {
-      // silent
-    }
+    try { await this.plugin?.disconnect(); } catch { /* silent */ }
     this.connectedDevice = null;
   }
 
@@ -124,12 +103,11 @@ export class JStyleAdapter implements WearableAdapter {
       return;
     }
     try {
-      // Plugin calls back with data per type
-      this.plugin?.addListener?.('syncData', (event: { type: BiomarkerType; samples: BiomarkerSample[] }) => {
-        this.emit('onData', event.type, event.samples);
+      this.plugin?.addListener?.('syncData', (ev: { type: BiomarkerType; samples: BiomarkerSample[] }) => {
+        this.emit('onData', ev.type, ev.samples);
       });
-      this.plugin?.addListener?.('syncEnd', (event: { type: BiomarkerType }) => {
-        this.emit('onSyncEnd', event.type);
+      this.plugin?.addListener?.('syncEnd', (ev: { type: BiomarkerType }) => {
+        this.emit('onSyncEnd', ev.type);
       });
       await this.plugin?.sync({ since: options?.since });
     } catch (e: any) {
@@ -138,18 +116,12 @@ export class JStyleAdapter implements WearableAdapter {
   }
 
   async enableRealtime(type: BiomarkerType): Promise<void> {
-    try {
-      await this.plugin?.enableRealtime({ type });
-    } catch (e: any) {
-      this.emit('onError', 'REALTIME_FAILED', e?.message ?? 'Realtime failed');
-    }
+    try { await this.plugin?.enableRealtime({ type }); }
+    catch (e: any) { this.emit('onError', 'REALTIME_FAILED', e?.message ?? 'Realtime failed'); }
   }
 
-  getDiagnostics(): DeviceDiagnostics | null {
-    return this.diagnostics;
-  }
+  getDiagnostics(): DeviceDiagnostics | null { return this._diagnostics; }
 
-  // Event system
   on<K extends keyof WearableEvents>(event: K, handler: WearableEvents[K]): void {
     (this.events[event] as Set<any>).add(handler);
   }

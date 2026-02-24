@@ -4,11 +4,8 @@ import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
 import { useVYRStore } from '@/hooks/useVYRStore';
-import { useWearable } from '@/hooks/useWearable';
 import { toast } from 'sonner';
-import WearableScanner from '@/components/wearable/WearableScanner';
-import SyncPanel from '@/components/wearable/SyncPanel';
-import DiagnosticsPanel from '@/components/wearable/DiagnosticsPanel';
+import WearableModule from '@/wearables/jstyle/WearableModule';
 
 const dataTypes = [
   { label: 'Frequência Cardíaca', key: 'heartRate' },
@@ -21,7 +18,6 @@ const dataTypes = [
 const IntegrationsPage = () => {
   const navigate = useNavigate();
   const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = useVYRStore();
-  const wearable = useWearable();
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
@@ -126,35 +122,7 @@ const IntegrationsPage = () => {
         </div>
 
         {/* J-Style Ring X3 */}
-        {wearable.enabled && (
-          <>
-            <WearableScanner
-              status={wearable.status}
-              devices={wearable.devices}
-              connectedDevice={wearable.connectedDevice}
-              onScan={wearable.scan}
-              onStopScan={wearable.stopScan}
-              onConnect={async (id) => {
-                const ok = await wearable.connect(id);
-                if (!ok) toast.error('Falha ao conectar');
-              }}
-              onDisconnect={wearable.disconnect}
-            />
-            {wearable.connectedDevice && (
-              <SyncPanel
-                status={wearable.status}
-                syncProgress={wearable.syncProgress}
-                onSync={() => wearable.sync()}
-                onFlush={async () => {
-                  const result = await wearable.flushToBackend();
-                  if (result) toast.success(`${result.inserted} amostras enviadas`);
-                  else toast.error('Nenhuma amostra para enviar');
-                }}
-              />
-            )}
-            <DiagnosticsPanel diagnostics={wearable.diagnostics} />
-          </>
-        )}
+        <WearableModule />
 
         {/* Others */}
         <div className="rounded-2xl bg-card border border-border p-4">
