@@ -22,7 +22,7 @@ jobs:
           cache: npm
 
       - name: Install JS deps
-        run: npm ci
+        run: npm install
 
       - name: Build web
         run: npm run build
