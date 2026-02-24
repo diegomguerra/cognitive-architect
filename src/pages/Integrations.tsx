@@ -4,7 +4,11 @@ import BackButton from '@/components/BackButton';
 import { useNavigate } from 'react-router-dom';
 import BottomNav from '@/components/BottomNav';
 import { useVYRStore } from '@/hooks/useVYRStore';
+import { useWearable } from '@/hooks/useWearable';
 import { toast } from 'sonner';
+import WearableScanner from '@/components/wearable/WearableScanner';
+import SyncPanel from '@/components/wearable/SyncPanel';
+import DiagnosticsPanel from '@/components/wearable/DiagnosticsPanel';
 
 const dataTypes = [
   { label: 'Frequência Cardíaca', key: 'heartRate' },
@@ -17,6 +21,7 @@ const dataTypes = [
 const IntegrationsPage = () => {
   const navigate = useNavigate();
   const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = useVYRStore();
+  const wearable = useWearable();
   const [syncing, setSyncing] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
@@ -120,21 +125,36 @@ const IntegrationsPage = () => {
           )}
         </div>
 
-        {/* J-Style Ring */}
-        <div className="rounded-2xl bg-card border border-border p-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-              <Activity size={20} className="text-muted-foreground" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">J-Style Ring</h3>
-              <p className="text-xs text-muted-foreground">Não conectado</p>
-            </div>
-          </div>
-          <button className="w-full rounded-xl bg-muted text-foreground font-medium py-3 text-sm transition-all active:scale-[0.98]">
-            Conectar J-Style Ring
-          </button>
-        </div>
+        {/* J-Style Ring X3 */}
+        {wearable.enabled && (
+          <>
+            <WearableScanner
+              status={wearable.status}
+              devices={wearable.devices}
+              connectedDevice={wearable.connectedDevice}
+              onScan={wearable.scan}
+              onStopScan={wearable.stopScan}
+              onConnect={async (id) => {
+                const ok = await wearable.connect(id);
+                if (!ok) toast.error('Falha ao conectar');
+              }}
+              onDisconnect={wearable.disconnect}
+            />
+            {wearable.connectedDevice && (
+              <SyncPanel
+                status={wearable.status}
+                syncProgress={wearable.syncProgress}
+                onSync={() => wearable.sync()}
+                onFlush={async () => {
+                  const result = await wearable.flushToBackend();
+                  if (result) toast.success(`${result.inserted} amostras enviadas`);
+                  else toast.error('Nenhuma amostra para enviar');
+                }}
+              />
+            )}
+            <DiagnosticsPanel diagnostics={wearable.diagnostics} />
+          </>
+        )}
 
         {/* Others */}
         <div className="rounded-2xl bg-card border border-border p-4">

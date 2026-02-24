@@ -44,6 +44,53 @@ export type Database = {
         }
         Relationships: []
       }
+      biomarker_samples: {
+        Row: {
+          device_id: string
+          end_ts: string | null
+          id: string
+          payload_json: Json | null
+          raw_hash: string
+          source: string | null
+          ts: string
+          type: string
+          user_id: string
+          value: number | null
+        }
+        Insert: {
+          device_id: string
+          end_ts?: string | null
+          id?: string
+          payload_json?: Json | null
+          raw_hash: string
+          source?: string | null
+          ts: string
+          type: string
+          user_id: string
+          value?: number | null
+        }
+        Update: {
+          device_id?: string
+          end_ts?: string | null
+          id?: string
+          payload_json?: Json | null
+          raw_hash?: string
+          source?: string | null
+          ts?: string
+          type?: string
+          user_id?: string
+          value?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "biomarker_samples_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       checkpoints: {
         Row: {
           checkpoint_type: string
@@ -152,6 +199,74 @@ export type Database = {
           stress_score?: number | null
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      device_sync_state: {
+        Row: {
+          cursor_by_type: Json | null
+          device_id: string
+          last_error: string | null
+          last_success_at: string | null
+          last_sync_at: string | null
+          user_id: string
+        }
+        Insert: {
+          cursor_by_type?: Json | null
+          device_id: string
+          last_error?: string | null
+          last_success_at?: string | null
+          last_sync_at?: string | null
+          user_id: string
+        }
+        Update: {
+          cursor_by_type?: Json | null
+          device_id?: string
+          last_error?: string | null
+          last_success_at?: string | null
+          last_sync_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "device_sync_state_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "devices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      devices: {
+        Row: {
+          device_uid: string
+          fw_version: string | null
+          id: string
+          last_seen_at: string | null
+          model: string
+          paired_at: string | null
+          user_id: string
+          vendor: string
+        }
+        Insert: {
+          device_uid: string
+          fw_version?: string | null
+          id?: string
+          last_seen_at?: string | null
+          model: string
+          paired_at?: string | null
+          user_id: string
+          vendor: string
+        }
+        Update: {
+          device_uid?: string
+          fw_version?: string | null
+          id?: string
+          last_seen_at?: string | null
+          model?: string
+          paired_at?: string | null
+          user_id?: string
+          vendor?: string
         }
         Relationships: []
       }
