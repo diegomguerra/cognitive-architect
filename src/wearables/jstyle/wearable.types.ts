@@ -1,5 +1,8 @@
 /** Wearable types — production contract */
 
+/** Supported wearable models */
+export type WearableModel = 'X3' | 'J5Vital';
+
 /** Device discovered during BLE scan */
 export interface WearableDevice {
   deviceId: string;
@@ -19,14 +22,25 @@ export type WearableStatus =
   | 'disconnected'
   | 'error';
 
-/** Supported biomarker types */
-export type BiomarkerType =
+/** Core biomarker types (shared X3 + V5) */
+export type BiomarkerTypeCore =
   | 'sleep'
   | 'hrv'
   | 'spo2'
   | 'temp'
   | 'steps'
   | 'hr';
+
+/** Extended biomarker types (V5 only, feature-flagged) */
+export type BiomarkerTypeV5 =
+  | 'ecg_history'
+  | 'ecg_raw'
+  | 'ppg'
+  | 'ppi'
+  | 'rr_interval';
+
+/** All biomarker types */
+export type BiomarkerType = BiomarkerTypeCore | BiomarkerTypeV5;
 
 /** Single biomarker sample */
 export interface BiomarkerSample {
@@ -95,4 +109,19 @@ export interface IngestBatchResponse {
   duplicates: number;
   errors: number;
   types: string[];
+}
+
+/** V5 feature flags */
+export const V5_EXTENDED_TYPES: BiomarkerTypeV5[] = [
+  'ecg_history', 'ecg_raw', 'ppg', 'ppi', 'rr_interval',
+];
+
+/** Core types shared by all models */
+export const CORE_BIOMARKER_TYPES: BiomarkerTypeCore[] = [
+  'sleep', 'hrv', 'spo2', 'temp', 'steps', 'hr',
+];
+
+/** Check if V5 extended types are enabled */
+export function isV5ExtendedEnabled(): boolean {
+  return import.meta.env.VITE_V5_EXTENDED === 'true';
 }
