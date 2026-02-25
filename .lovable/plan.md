@@ -1,38 +1,29 @@
 
 
-## Correção de Indentação no project.pbxproj
+## Aplicar correção no `ios/debug.xcconfig`
 
-### Contexto
-- Você **abre** o `App.xcworkspace` no Xcode (correto)
-- As **configurações de build** ficam dentro do `project.pbxproj` (é onde editamos)
-- São camadas complementares, não conflitantes
+### Arquivo: `ios/debug.xcconfig`
 
-### Problema
-O diff anterior mostra que as linhas 380-388 (Target Debug) e 411-419 (Target Release) perderam 1 nível de indentação — estão com 3 tabs em vez de 4 tabs como o restante do bloco `buildSettings`.
+Substituir o conteúdo atual por:
 
-### Plano
-
-**Arquivo: `ios/App/App.xcodeproj/project.pbxproj`**
-
-Restaurar a indentação correta (4 tabs) nas linhas afetadas, mantendo o `ENABLE_USER_SCRIPT_SANDBOXING = NO` que já foi adicionado:
-
-**Target Debug (linhas ~380-388)** — de 3 tabs para 4 tabs:
 ```
-				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = WNB4G5T7Z6;
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
-				INFOPLIST_FILE = App/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+#include "App/Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"
+// Configuration settings file format documentation can be found at:
+// https://help.apple.com/xcode/#/dev745c5c974
+ENABLE_USER_SCRIPT_SANDBOXING = NO
 ```
 
-**Target Release (linhas ~411-419)** — mesma correção.
+Única mudança: adicionar a linha `#include` no topo.
 
-### Após aplicar
-1. No terminal (já em `ios/App/`): `open App.xcworkspace`
-2. Clean Build: `⌘ + Shift + K`
-3. Run: `⌘ + R`
+### Após o deploy, o Bruno roda:
+
+```bash
+git pull
+npx cap sync ios
+cd ios/App
+pod install
+open App.xcworkspace
+```
+
+No Xcode: `⌘+Shift+K` (Clean) → `⌘+R` (Run)
 
