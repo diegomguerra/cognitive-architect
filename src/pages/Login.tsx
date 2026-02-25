@@ -60,12 +60,20 @@ const Login = () => {
             </p>
           </div>
         </div>
-        <span
-          className="border rounded px-3 py-1 text-[10px] uppercase tracking-[0.3em] font-mono self-start mt-1"
-          style={{ borderColor: '#2a3441', color: '#6b7b8d' }}
-        >
-          secure
-        </span>
+        <div className="flex flex-col items-start gap-1 mt-1">
+          <span
+            className="border rounded px-3 py-1 text-[10px] uppercase tracking-[0.3em] font-mono"
+            style={{ borderColor: '#2a3441', color: '#6b7b8d' }}
+          >
+            secure
+          </span>
+          <span
+            className="text-[10px] uppercase tracking-[0.3em] font-mono"
+            style={{ color: '#6b7b8d' }}
+          >
+            v1.0
+          </span>
+        </div>
       </div>
 
       {/* Card */}
