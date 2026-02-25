@@ -1,39 +1,38 @@
 
 
-## Problema Real
+## Correção de Indentação no project.pbxproj
 
-O `ENABLE_USER_SCRIPT_SANDBOXING = NO` foi aplicado apenas no **nível do Project** (configurações globais). Mas o Xcode também tem configurações no **nível do Target** (App), e o Target sobrescreve o Project. Como o Target não tem essa configuração explicitamente em `NO`, ele herda o default do Xcode (que é `YES` em versões recentes).
+### Contexto
+- Você **abre** o `App.xcworkspace` no Xcode (correto)
+- As **configurações de build** ficam dentro do `project.pbxproj` (é onde editamos)
+- São camadas complementares, não conflitantes
 
-Fonte: StackOverflow confirma que a correção exige mudar em **ambos** -- Project e Target.
+### Problema
+O diff anterior mostra que as linhas 380-388 (Target Debug) e 411-419 (Target Release) perderam 1 nível de indentação — estão com 3 tabs em vez de 4 tabs como o restante do bloco `buildSettings`.
 
-## Plano
+### Plano
 
-### Arquivo: `ios/App/App.xcodeproj/project.pbxproj`
+**Arquivo: `ios/App/App.xcodeproj/project.pbxproj`**
 
-Adicionar `ENABLE_USER_SCRIPT_SANDBOXING = NO;` nas **duas** build configurations do **Target** App:
+Restaurar a indentação correta (4 tabs) nas linhas afetadas, mantendo o `ENABLE_USER_SCRIPT_SANDBOXING = NO` que já foi adicionado:
 
-**1. Target Debug** (bloco `504EC3171FED79650016851F`, linha 378):
-Adicionar dentro de `buildSettings`, por exemplo após `CLANG_ENABLE_MODULES = YES;`:
-
+**Target Debug (linhas ~380-388)** — de 3 tabs para 4 tabs:
 ```
-ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WNB4G5T7Z6;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				INFOPLIST_FILE = App/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 ```
 
-**2. Target Release** (bloco `504EC3181FED79650016851F`, linha 408):
-Adicionar dentro de `buildSettings`, por exemplo após `CLANG_ENABLE_MODULES = YES;`:
+**Target Release (linhas ~411-419)** — mesma correção.
 
-```
-ENABLE_USER_SCRIPT_SANDBOXING = NO;
-```
-
-### Resultado esperado
-
-Com a configuração em NO nos 4 locais (Project Debug, Project Release, Target Debug, Target Release), o erro `Sandbox: bash deny(1) file-read-data` deve desaparecer definitivamente.
-
-### Apos aplicar
-
-1. `cd ios/App && pod deintegrate && pod install`
-2. Abrir `App.xcworkspace`
-3. Clean Build (Cmd+Shift+K)
-4. Run (Cmd+R)
+### Após aplicar
+1. No terminal (já em `ios/App/`): `open App.xcworkspace`
+2. Clean Build: `⌘ + Shift + K`
+3. Run: `⌘ + R`
 
