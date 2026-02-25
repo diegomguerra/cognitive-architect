@@ -223,10 +223,15 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
   syncLock = true;
   try {
     let changed = false;
-    for (const type of ALL_SYNC_TYPES) {
-      const res = await VYRHealthBridge.readAnchored({ type: String(type), anchor: getAnchor(String(type)), limit: 200 });
-      if ((res.samples?.length ?? 0) > 0) changed = true;
-      setAnchor(String(type), res.newAnchor);
+    // Only read bridge-supported types (not plugin-only or write-only types)
+    for (const type of BRIDGE_READ_TYPES) {
+      try {
+        const res = await VYRHealthBridge.readAnchored({ type: String(type), anchor: getAnchor(String(type)), limit: 200 });
+        if ((res.samples?.length ?? 0) > 0) changed = true;
+        setAnchor(String(type), res.newAnchor);
+      } catch (e) {
+        console.warn(`[healthkit] readAnchored skipped for ${type}:`, e);
+      }
     }
 
     if (!changed && trigger === 'observer') return true;
