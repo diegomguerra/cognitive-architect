@@ -1,64 +1,26 @@
 
 
-## Diagnóstico
+## Status das dependências
 
-### 1. `.github/workflows/sync-repo.yml`
-Este workflow sincroniza para um repositório destino usando secrets `DEST_REPO` e `DEST_REPO_TOKEN`. Se esses secrets não estão configurados, a URL fica `https://github.com/.git` e o workflow falha. Deve ser **deletado**.
+1. **Swift (`VYRHealthBridge.swift`)** — `@objc func requestAuthorization` já implementado (diff anterior).
+2. **TypeScript bridge (`healthkit-bridge.ts`)** — `requestAuthorization` já declarado na linha 15. A assinatura atual retorna `Promise<{ granted: boolean }>` (não `Promise<void>`), o que é correto pois o Swift resolve com `["granted": true]`.
+3. **`healthkit.ts`** — falta a chamada ao bridge após a linha 87.
 
-### 2. `.github/workflows/ios-build.yml`
-Conteúdo atual (já atualizado nas edições anteriores):
+## Plano
 
-```yaml
-name: iOS Build & TestFlight
+**Arquivo:** `src/lib/healthkit.ts`
 
-on:
-  push:
-    branches: [main]
+Após a linha 87 (`await Health.requestAuthorization(...)`) inserir:
 
-jobs:
-  build:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Capacitor CLI
-        run: npx cap --version || npm install -g @capacitor/cli
-
-      - name: Sync Capacitor
-        run: npx cap sync ios
-
-      - name: Install CocoaPods
-        run: |
-          cd ios/App
-          pod install
-
-      - name: Build iOS
-        run: |
-          xcodebuild -workspace ios/App/App.xcworkspace \
-            -scheme App \
-            -configuration Release \
-            -destination generic/platform=iOS \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+```ts
+    // Request bridge-only types (resting HR, HRV, SpO2, respiratory rate)
+    await VYRHealthBridge.requestAuthorization({
+      readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
+      writeTypes: [],
+    });
 ```
 
-Este workflow está correto para validar compilação sem signing.
+O import de `VYRHealthBridge` já existe na linha 4 do arquivo (`import { VYRHealthBridge } from './healthkit-bridge'`), então nenhuma alteração de imports é necessária.
 
-## Plano de execução
-
-| Arquivo | Ação |
-|---|---|
-| `.github/workflows/sync-repo.yml` | **Deletar** completamente |
-
-Apenas uma alteração: deletar o arquivo de sync. O `ios-build.yml` já está no estado correto e não precisa de mudanças.
+**Nenhuma outra mudança é necessária** — tanto o Swift quanto o TypeScript bridge já estão prontos.
 
