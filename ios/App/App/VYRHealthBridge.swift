@@ -15,7 +15,8 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getAuthorizationStatuses", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "enableBackgroundDelivery", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "registerObserverQueries", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "readAnchored", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "readAnchored", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise)
     ]
 
     private let healthStore = HKHealthStore()
@@ -68,6 +69,43 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
 
     @objc func isHealthKitAvailable(_ call: CAPPluginCall) {
         call.resolve(["available": HKHealthStore.isHealthDataAvailable()])
+    }
+
+    @objc func requestAuthorization(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.reject("HealthKit is not available on this device")
+            return
+        }
+
+        let readKeys = call.getArray("readTypes", String.self) ?? []
+        let writeKeys = call.getArray("writeTypes", String.self) ?? []
+
+        var readSet = Set<HKObjectType>()
+        for key in readKeys {
+            if let type = sampleType(for: key) {
+                readSet.insert(type)
+            }
+        }
+
+        var writeSet = Set<HKSampleType>()
+        for key in writeKeys {
+            if let type = sampleType(for: key) {
+                writeSet.insert(type)
+            }
+        }
+
+        if readSet.isEmpty && writeSet.isEmpty {
+            call.reject("At least one readTypes or writeTypes entry is required")
+            return
+        }
+
+        healthStore.requestAuthorization(toShare: writeSet, read: readSet) { success, error in
+            if success {
+                call.resolve(["granted": true])
+            } else {
+                call.reject(error?.localizedDescription ?? "Authorization request failed")
+            }
+        }
     }
 
     @objc func writeBodyTemperature(_ call: CAPPluginCall) {

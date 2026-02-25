@@ -12,6 +12,7 @@ export interface VYRHealthBridgePlugin {
   enableBackgroundDelivery(options: { type: string; frequency?: 'immediate' | 'hourly' | 'daily' }): Promise<{ success: boolean }>;
   registerObserverQueries(options: { types: string[] }): Promise<{ registered: number }>;
   readAnchored(options: { type: string; anchor?: string; limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  requestAuthorization(options: { readTypes?: string[]; writeTypes?: string[] }): Promise<{ granted: boolean }>;
   addListener(eventName: 'healthkitObserverUpdated', listenerFunc: (event: { type: string }) => void): Promise<{ remove: () => Promise<void> }>;
   addListener(eventName: 'healthkitObserverError', listenerFunc: (event: { type: string; error: string }) => void): Promise<{ remove: () => Promise<void> }>;
 }
