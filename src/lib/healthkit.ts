@@ -86,6 +86,12 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
 
     await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
 
+    // Request bridge-only types (resting HR, HRV, SpO2, respiratory rate)
+    await VYRHealthBridge.requestAuthorization({
+      readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
+      writeTypes: [],
+    });
+
     const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
     const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
     const deniedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingDenied' || s === 'notDetermined').map(([t]) => t);
