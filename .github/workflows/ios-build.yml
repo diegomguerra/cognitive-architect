@@ -5,75 +5,44 @@ on:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: ios-build-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
-    runs-on: macos-15
-
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
-      - name: Install JS deps
-        run: npm ci
+      - name: Install dependencies
+        run: npm install --include=dev
 
-      - name: Build web
+      - name: Install Capacitor iOS
+        run: npm install @capacitor/ios @capacitor/cli --save-dev
+
+      - name: Build web assets
         run: npm run build
 
-      - name: Sync Capacitor (iOS)
+      - name: Install Capacitor CLI
+        run: npx cap --version || npm install -g @capacitor/cli
+
+      - name: Sync Capacitor
         run: npx cap sync ios
 
-      - name: Patch iOS (Info.plist + entitlements)
-        run: node scripts/patch-ios.mjs
-
-      - name: Setup Ruby (Fastlane)
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-          working-directory: ios
-
       - name: Install CocoaPods
-        working-directory: ios/App
         run: |
-          if [ -f Podfile ]; then
-            pod install --repo-update
-          else
-            echo "No Podfile found; skipping pods"
-          fi
+          cd ios/App
+          pod install
 
-      - name: Prepare App Store Connect API key file
-        working-directory: ios
-        env:
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+      - name: Build iOS
         run: |
-          mkdir -p fastlane/keys
-          printf '%s' "$APP_STORE_CONNECT_API_KEY" > fastlane/keys/AuthKey.p8
-
-      - name: Setup signing (match)
-        working-directory: ios
-        env:
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-        run: bundle exec fastlane match appstore --readonly
-
-      - name: Build & Upload to TestFlight
-        working-directory: ios
-        env:
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-        run: bundle exec fastlane build
+          xcodebuild -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination generic/platform=iOS \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
