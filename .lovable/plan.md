@@ -1,19 +1,10 @@
+## Correção Capacitor 8 — Plugin Registration
 
+### Feito pelo Lovable
+1. `AppDelegate.swift` — removido `CAPBridge.registerPlugin(VYRHealthBridge.self)`
+2. `MyViewController.swift` — criado com `capacitorDidLoad()` registrando o plugin
 
-## Plano de execução
-
-### 1. Editar `ios/App/App/AppDelegate.swift`
-Remover `CAPBridge.registerPlugin(VYRHealthBridge.self)` do `didFinishLaunchingWithOptions`, mantendo apenas `return true`.
-
-### 2. Criar `ios/App/App/MyViewController.swift`
-Novo arquivo com `CAPBridgeViewController` subclass que registra o plugin via `bridge?.registerPluginInstance(VYRHealthBridge())` em `capacitorDidLoad()`.
-
-### 3. Atualizar `.lovable/plan.md`
-Documentar os passos manuais que o Bruno precisa fazer no Xcode após `git pull`.
-
----
-
-### O que o Bruno faz no Mac após o deploy
+### O que o Bruno faz no Mac
 
 ```text
 1. git pull
@@ -33,4 +24,3 @@ No Xcode:
 7. ⌘+Shift+K (Clean Build)
 8. ⌘+R (Run)
 ```
-
