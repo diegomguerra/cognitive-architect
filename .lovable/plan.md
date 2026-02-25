@@ -1,41 +1,39 @@
 
 
-## Analise do erro no Xcode
+## Problema Real
 
-A screenshot mostra 3 problemas:
+O `ENABLE_USER_SCRIPT_SANDBOXING = NO` foi aplicado apenas no **nível do Project** (configurações globais). Mas o Xcode também tem configurações no **nível do Target** (App), e o Target sobrescreve o Project. Como o Target não tem essa configuração explicitamente em `NO`, ele herda o default do Xcode (que é `YES` em versões recentes).
 
-1. **Erro critico (vermelho):** `Sandbox: bash(69449) deny(1) file-read-data` — O Xcode esta bloqueando os scripts do CocoaPods de ler arquivos. Causa: `ENABLE_USER_SCRIPT_SANDBOXING = YES` no `project.pbxproj` (linhas de Debug e Release do Project).
+Fonte: StackOverflow confirma que a correção exige mudar em **ambos** -- Project e Target.
 
-2. **Warning:** `'HealthPlugin' is missing a dependency on 'Capacitor'` — O pacote SPM `CapApp-SPM` nao declara `Capacitor` como dependencia. O `@capgo/capacitor-health` (HealthPlugin) precisa do Capacitor como dependencia do modulo Swift.
+## Plano
 
-3. **Warning:** `[CP] Embed Pods Frameworks` rodando a cada build — consequencia do sandbox bloqueando I/O.
+### Arquivo: `ios/App/App.xcodeproj/project.pbxproj`
 
-## Plano de correcao (2 arquivos)
+Adicionar `ENABLE_USER_SCRIPT_SANDBOXING = NO;` nas **duas** build configurations do **Target** App:
 
-### 1. `ios/App/App.xcodeproj/project.pbxproj`
-
-Mudar `ENABLE_USER_SCRIPT_SANDBOXING = YES` para `NO` nas **duas** build configurations do Project (Debug linha ~219 e Release linha ~252). Isso permite que os scripts do CocoaPods leiam arquivos no disco.
-
-Locais exatos:
-- Bloco `504EC3141FED79650016851F /* Debug */` (Project-level) — alterar `ENABLE_USER_SCRIPT_SANDBOXING = YES;` para `ENABLE_USER_SCRIPT_SANDBOXING = NO;`
-- Bloco `504EC3151FED79650016851F /* Release */` (Project-level) — alterar `ENABLE_USER_SCRIPT_SANDBOXING = YES;` para `ENABLE_USER_SCRIPT_SANDBOXING = NO;`
-
-### 2. `ios/debug.xcconfig`
-
-Adicionar a linha para garantir que o xcconfig tambem desabilita o sandbox:
+**1. Target Debug** (bloco `504EC3171FED79650016851F`, linha 378):
+Adicionar dentro de `buildSettings`, por exemplo após `CLANG_ENABLE_MODULES = YES;`:
 
 ```
-ENABLE_USER_SCRIPT_SANDBOXING = NO
+ENABLE_USER_SCRIPT_SANDBOXING = NO;
+```
+
+**2. Target Release** (bloco `504EC3181FED79650016851F`, linha 408):
+Adicionar dentro de `buildSettings`, por exemplo após `CLANG_ENABLE_MODULES = YES;`:
+
+```
+ENABLE_USER_SCRIPT_SANDBOXING = NO;
 ```
 
 ### Resultado esperado
 
-Apos essas mudancas:
-- O erro `Sandbox: deny(1) file-read-data` desaparece
-- Os scripts `[CP] Check Pods Manifest.lock` e `[CP] Embed Pods Frameworks` conseguem executar
-- O warning do HealthPlugin pode persistir mas nao bloqueia o build
+Com a configuração em NO nos 4 locais (Project Debug, Project Release, Target Debug, Target Release), o erro `Sandbox: bash deny(1) file-read-data` deve desaparecer definitivamente.
 
-### Proximo passo apos o build
+### Apos aplicar
 
-Clean Build (⌘+Shift+K) e depois Run (⌘+R) no device fisico.
+1. `cd ios/App && pod deintegrate && pod install`
+2. Abrir `App.xcworkspace`
+3. Clean Build (Cmd+Shift+K)
+4. Run (Cmd+R)
 
