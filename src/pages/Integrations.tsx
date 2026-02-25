@@ -7,6 +7,7 @@ import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
 import WearableModule from '@/wearables/jstyle/WearableModule';
 import BiomarkerDataCard from '@/components/BiomarkerDataCard';
+import DebugConsole from '@/components/DebugConsole';
 
 const dataTypes = [
   { label: 'Frequência Cardíaca', key: 'heartRate' },
@@ -141,6 +142,7 @@ const IntegrationsPage = () => {
         </div>
       </div>
 
+      <DebugConsole />
       <BottomNav />
     </div>
   );

@@ -17,7 +17,6 @@ import IntegrationsPage from "./pages/Integrations";
 import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
-import DebugConsole from "./components/DebugConsole";
 
 const queryClient = new QueryClient();
 
@@ -61,7 +60,6 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <AppRoutes />
-          <DebugConsole />
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
