@@ -1,44 +1,18 @@
 
 
-## Painel de Debug Visual no App
+## Plano: Gerar ícone 1024x1024 para o App Store
 
-### Problema
-O Safari Web Inspector não consegue inspecionar o app Capacitor no iPhone (mostra apenas "Conecte via Network"), impossibilitando ver os logs JavaScript durante a integração com o HealthKit.
+O app já tem o `src/assets/brain-icon.png` (logo do cérebro) e usa tema escuro com tons de azul-cinza. Vou criar uma edge function temporária que usa a API de geração de imagem para criar um ícone de app 1024x1024 no estilo VYR Labs.
 
-### Solução
-Criar um componente de debug visual embutido no app que captura todos os `console.log`, `console.error` e `console.warn` e os exibe em um painel overlay na tela do iPhone. Assim não é necessário o Safari Web Inspector.
+### O que vou fazer
 
-### Arquivos a criar/modificar
+1. **Criar edge function `generate-app-icon`** que chama a API de imagem (Gemini) com um prompt descrevendo o ícone: fundo escuro (#0f1114), símbolo de cérebro minimalista em tons de azul-acinzentado, estilo clean para app icon iOS, sem texto, cantos arredondados
+2. **Salvar a imagem gerada** como base64 e retornar para download
+3. **Chamar a function** e disponibilizar o resultado para você baixar e usar no Xcode
 
-**1. Criar `src/components/DebugConsole.tsx`**
-- Componente overlay flutuante que aparece sobre qualquer tela
-- Botão pequeno no canto inferior esquerdo (ex: "🐛") para abrir/fechar
-- Área com scroll mostrando os logs capturados em tempo real
-- Cada log com timestamp, nível (info/warn/error) e mensagem
-- Botão "Limpar" para resetar os logs
-- Botão "Copiar tudo" para copiar os logs para o clipboard
-- Sobrescreve `console.log`, `console.warn`, `console.error` para capturar tudo
-- Só aparece em ambiente de desenvolvimento ou quando ativado manualmente
+Depois de gerar e baixar, a function pode ser removida.
 
-**2. Modificar `src/App.tsx`**
-- Importar e renderizar `<DebugConsole />` como último filho do layout principal
-- Visível apenas em plataforma nativa (Capacitor) ou via flag
+### Alternativa mais rápida
 
-### Detalhes técnicos
-
-O componente irá:
-1. No `useEffect` de montagem, interceptar `console.log`, `console.warn`, `console.error` salvando os originais e substituindo por wrappers que chamam o original + armazenam a mensagem em state
-2. Manter um array de até 500 mensagens no state com `{ timestamp, level, message }`
-3. Usar `JSON.stringify` para serializar objetos nos argumentos do console
-4. Auto-scroll para o final quando novos logs chegam
-5. Restaurar os console originais no `useEffect` cleanup
-
-Estilo visual:
-- Fundo escuro semi-transparente com texto monoespaçado
-- Errors em vermelho, warns em amarelo, logs em verde
-- Overlay com z-index alto para ficar sobre todo o app
-- Altura ~50% da tela, com resize possível
-
-### Resultado esperado
-Ao abrir o app no iPhone e tocar no botão de debug, os logs JavaScript aparecem diretamente na tela. Ao tentar conectar o Apple Health, todos os logs `[healthkit]` ficam visíveis no painel, permitindo diagnosticar o problema sem depender do Safari Web Inspector.
+Se preferir, você pode usar o próprio `src/assets/brain-icon.png` existente e redimensionar para 1024x1024 usando o Preview.app do Mac (Ferramentas → Ajustar Tamanho → 1024x1024). Ou usar https://appicon.co para gerar todos os tamanhos a partir dele.
 
