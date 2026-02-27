@@ -81,22 +81,30 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
     const { Health } = await import('@capgo/capacitor-health');
+
+    // Try @capgo plugin authorization — may throw UNIMPLEMENTED on repeat calls
+    try {
+      await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
+    } catch (pluginErr: any) {
+      console.warn('[healthkit] @capgo requestAuthorization failed (may already be granted):', pluginErr?.code || pluginErr);
+    }
+
+    // Try bridge authorization — also tolerant of repeat calls
+    try {
+      await VYRHealthBridge.requestAuthorization({
+        readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
+        writeTypes: [],
+      });
+    } catch (bridgeErr: any) {
+      console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
+    }
+
+    // Check what we actually have access to
     const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
-    const beforeStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
-
-    await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
-
-    // Request bridge-only types (resting HR, HRV, SpO2, respiratory rate)
-    await VYRHealthBridge.requestAuthorization({
-      readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
-      writeTypes: [],
-    });
-
     const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
     const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
-    const deniedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingDenied' || s === 'notDetermined').map(([t]) => t);
 
-    console.info('[healthkit] authorization status', { beforeStatus, afterStatus, grantedTypesCount: grantedTypes.length, deniedTypes });
+    console.info('[healthkit] authorization status after request', { afterStatus, grantedTypesCount: grantedTypes.length });
 
     await forceRefreshSession();
     return grantedTypes.length > 0;
