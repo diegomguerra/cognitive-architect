@@ -80,16 +80,26 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
+    // First check if we already have permissions — skip re-requesting if so
+    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
+    const currentStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
+    const alreadyGranted = Object.entries(currentStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
+
+    if (alreadyGranted.length > 0) {
+      console.info('[healthkit] permissions already granted, skipping re-request', { count: alreadyGranted.length });
+      await forceRefreshSession();
+      return true;
+    }
+
+    // First time — request permissions
     const { Health } = await import('@capgo/capacitor-health');
 
-    // Try @capgo plugin authorization — may throw UNIMPLEMENTED on repeat calls
     try {
       await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
     } catch (pluginErr: any) {
-      console.warn('[healthkit] @capgo requestAuthorization failed (may already be granted):', pluginErr?.code || pluginErr);
+      console.warn('[healthkit] @capgo requestAuthorization failed:', pluginErr?.code || pluginErr);
     }
 
-    // Try bridge authorization — also tolerant of repeat calls
     try {
       await VYRHealthBridge.requestAuthorization({
         readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
@@ -99,12 +109,10 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
     }
 
-    // Check what we actually have access to
-    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
     const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
     const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
 
-    console.info('[healthkit] authorization status after request', { afterStatus, grantedTypesCount: grantedTypes.length });
+    console.info('[healthkit] authorization result', { grantedCount: grantedTypes.length });
 
     await forceRefreshSession();
     return grantedTypes.length > 0;
