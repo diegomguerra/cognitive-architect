@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Info, Zap, Eye, Moon, Clock, Check, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,15 +9,15 @@ import type { PhaseValues } from '@/lib/vyr-recompute';
 import { toast } from 'sonner';
 
 const phases = [
-  { key: 'BOOT', label: 'Boot', sub: '05h–11h59', icon: Zap },
-  { key: 'HOLD', label: 'Hold', sub: '12h–17h59', icon: Eye },
-  { key: 'CLEAR', label: 'Clear', sub: '18h–22h', icon: Moon },
+  { key: 'BOOT', label: 'Boot', sub: '05h-11h59', icon: Zap },
+  { key: 'HOLD', label: 'Hold', sub: '12h-17h59', icon: Eye },
+  { key: 'CLEAR', label: 'Clear', sub: '18h-22h', icon: Moon },
 ] as const;
 
 const phaseDescriptions: Record<string, string> = {
-  BOOT: 'BOOT — Manhã · Ativação',
-  HOLD: 'HOLD — Tarde · Sustentação',
-  CLEAR: 'CLEAR — Noite · Recuperação',
+  BOOT: 'Registre sua percepção para a fase BOOT.',
+  HOLD: 'Registre sua percepção para a fase HOLD.',
+  CLEAR: 'Registre sua percepção para a fase CLEAR.',
 };
 
 const sliders = [
@@ -40,7 +40,6 @@ const PerceptionsTab = () => {
   const { session } = useAuth();
   const { checkpoints, perceptionsDone, getPhasePerceptionValues, logPerception, refresh } = useVYRStore();
   const [showInfo, setShowInfo] = useState(true);
-  const [selectedPhase, setSelectedPhase] = useState<'BOOT' | 'HOLD' | 'CLEAR' | null>(null);
   const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, number>>(
@@ -51,12 +50,12 @@ const PerceptionsTab = () => {
   const allPhasesDone = phases.every((p) => perceptionsDone.includes(p.key));
   const clearDone = perceptionsDone.includes('CLEAR');
 
-  // Auto-select the current active phase that hasn't been recorded yet
+  // Auto-expand the current active phase that hasn't been recorded yet
   useEffect(() => {
-    if (selectedPhase) return;
+    if (expandedPhase) return;
     const active = phases.find((p) => isPhaseActive(p.key) && !perceptionsDone.includes(p.key));
-    if (active) setSelectedPhase(active.key as any);
-  }, [perceptionsDone, selectedPhase]);
+    if (active) setExpandedPhase(active.key);
+  }, [perceptionsDone, expandedPhase]);
 
   // Load history only when CLEAR is done
   useEffect(() => {
@@ -72,7 +71,7 @@ const PerceptionsTab = () => {
     const allValues: Record<string, PhaseValues> = {};
     for (const p of phases) {
       const vals = getPhasePerceptionValues(p.key);
-      if (vals) allValues[p.key] = vals as PhaseValues;
+      if (vals) allValues[p.key] = vals as unknown as PhaseValues;
     }
     if (Object.keys(allValues).length === 3) {
       computeDayMeanFromPhases(allValues)
@@ -87,6 +86,7 @@ const PerceptionsTab = () => {
 
   const handlePhaseClick = (phaseKey: string) => {
     const isDone = perceptionsDone.includes(phaseKey);
+
     if (isDone) {
       // Toggle expand to show saved values
       setExpandedPhase((prev) => prev === phaseKey ? null : phaseKey);
@@ -99,19 +99,21 @@ const PerceptionsTab = () => {
       return;
     }
 
-    setSelectedPhase(phaseKey as any);
-    setExpandedPhase(null);
-    setValues(Object.fromEntries(sliders.map((s) => [s.key, 5])));
+    // Toggle expand for active phase
+    if (expandedPhase === phaseKey) {
+      setExpandedPhase(null);
+    } else {
+      setExpandedPhase(phaseKey);
+      setValues(Object.fromEntries(sliders.map((s) => [s.key, 5])));
+    }
   };
 
   const handleSubmit = async () => {
-    if (!selectedPhase) return;
+    if (!expandedPhase || perceptionsDone.includes(expandedPhase)) return;
     setSaving(true);
     try {
-      // 1. Log perception to action_logs
-      await logPerception(selectedPhase, values);
+      await logPerception(expandedPhase, values);
 
-      // 2. Recompute VYR State with current values
       try {
         await recomputeStateWithPerceptions({
           energy: values.energia,
@@ -123,13 +125,13 @@ const PerceptionsTab = () => {
         console.warn('[perceptions] Recompute failed:', err);
       }
 
-      toast.success(`${selectedPhase} registrado`);
+      toast.success(`${expandedPhase} registrado`);
 
-      // 3. Select next available phase
+      // Select next available phase
       const nextPhase = phases.find(
-        (p) => !perceptionsDone.includes(p.key) && p.key !== selectedPhase && isPhaseActive(p.key)
+        (p) => !perceptionsDone.includes(p.key) && p.key !== expandedPhase && isPhaseActive(p.key)
       );
-      setSelectedPhase(nextPhase ? (nextPhase.key as any) : null);
+      setExpandedPhase(nextPhase ? nextPhase.key : null);
       setValues(Object.fromEntries(sliders.map((s) => [s.key, 5])));
     } catch (err) {
       console.error('[perceptions] Save failed:', err);
@@ -149,7 +151,7 @@ const PerceptionsTab = () => {
     <div className="space-y-4">
       {/* Tutorial */}
       {showInfo && (
-        <div className="rounded-2xl bg-card border border-border p-4" style={{ borderColor: 'hsl(var(--vyr-accent-action) / 0.2)' }}>
+        <div className="rounded-2xl bg-card border border-border p-4">
           <div className="flex items-start justify-between mb-3">
             <div className="flex items-center gap-2">
               <Info size={16} className="text-muted-foreground" />
@@ -158,9 +160,7 @@ const PerceptionsTab = () => {
             <button onClick={() => setShowInfo(false)} className="text-xs text-muted-foreground hover:text-foreground">Fechar</button>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-            Registre suas percepções em cada fase do dia. O VYR combina{' '}
-            <span className="text-foreground font-medium">dados biométricos</span> com suas{' '}
-            <span className="text-foreground font-medium">percepções subjetivas</span> para calibrar seu estado cognitivo.
+            Registre suas percepções em cada fase do dia. Cada fase só pode ser registrada dentro do seu horário.
           </p>
           <div className="flex justify-center gap-6 mb-3">
             {phases.map(({ key, label, sub, icon: Icon }) => (
@@ -176,110 +176,130 @@ const PerceptionsTab = () => {
         </div>
       )}
 
-      {/* Phase Selector */}
+      {/* Phases List */}
       <div className="rounded-2xl bg-card border border-border p-4">
         <h3 className="text-xs uppercase tracking-[0.15em] font-semibold text-foreground mb-3">
-          Performance Cognitiva
+          Fases do dia
         </h3>
 
-        <div className="flex gap-2 mb-4">
-          {phases.map(({ key, label, icon: Icon }) => {
+        <div className="space-y-2">
+          {phases.map(({ key, label, sub, icon: Icon }) => {
             const status = getPhaseStatus(key);
-            const isSelected = selectedPhase === key && status === 'active';
             const isExpanded = expandedPhase === key;
+            const isDone = status === 'done';
+            const isActive = status === 'active';
+            const isLocked = status === 'locked';
 
             return (
-              <button
-                key={key}
-                onClick={() => handlePhaseClick(key)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                  isSelected ? 'bg-foreground text-background'
-                  : status === 'done' ? 'bg-muted/80 text-foreground'
-                  : status === 'locked' ? 'bg-muted/40 text-muted-foreground'
-                  : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {status === 'done' ? (
-                  <Check size={12} className="text-vyr-positive" />
-                ) : status === 'locked' ? (
-                  <Lock size={12} />
-                ) : (
-                  <Icon size={12} />
+              <div key={key}>
+                {/* Phase Row */}
+                <button
+                  onClick={() => handlePhaseClick(key)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${
+                    isExpanded && isActive
+                      ? 'bg-accent/20 border border-accent/30'
+                      : isDone
+                        ? 'bg-muted/50'
+                        : isLocked
+                          ? 'bg-muted/30 opacity-60'
+                          : 'bg-muted/50 hover:bg-muted/70'
+                  }`}
+                >
+                  {/* Phase Icon */}
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    isDone
+                      ? 'bg-vyr-positive/20'
+                      : isActive
+                        ? 'bg-accent/20'
+                        : 'bg-muted'
+                  }`}>
+                    {isDone ? (
+                      <Check size={16} className="text-vyr-positive" />
+                    ) : isLocked ? (
+                      <Lock size={14} className="text-muted-foreground" />
+                    ) : (
+                      <Icon size={16} className="text-accent-foreground" />
+                    )}
+                  </div>
+
+                  {/* Phase Info */}
+                  <div className="flex-1 text-left">
+                    <span className="text-sm font-semibold text-foreground block">{label.toUpperCase()}</span>
+                    <span className="text-[11px] text-muted-foreground">{sub}</span>
+                  </div>
+
+                  {/* Chevron */}
+                  {(isDone || isActive) && (
+                    isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />
+                  )}
+                </button>
+
+                {/* Expanded: Saved values for done phase */}
+                {isExpanded && isDone && (() => {
+                  const savedVals = getPhasePerceptionValues(key);
+                  if (!savedVals) return null;
+                  return (
+                    <div className="rounded-xl bg-muted/30 p-3 mt-1 ml-12">
+                      <div className="grid grid-cols-2 gap-2">
+                        {sliders.map((s) => (
+                          <div key={s.key} className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">{s.label}</span>
+                            <span className="text-xs font-mono font-bold text-foreground">{savedVals[s.key]}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Expanded: Sliders for active phase */}
+                {isExpanded && isActive && !isDone && (
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs text-muted-foreground mb-4">{phaseDescriptions[key]}</p>
+                    <div className="space-y-5">
+                      {sliders.map((s) => (
+                        <div key={s.key}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-bold text-foreground">{s.label}</span>
+                            <span className="text-sm font-mono font-bold text-foreground">{values[s.key]}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-2">{s.desc}</p>
+                          <input
+                            type="range"
+                            min={0}
+                            max={10}
+                            value={values[s.key]}
+                            onChange={(e) => handleChange(s.key, Number(e.target.value))}
+                            className="w-full accent-primary h-1"
+                          />
+                          <div className="flex justify-between mt-1">
+                            <span className="text-[10px] text-muted-foreground">Baixo</span>
+                            <span className="text-[10px] text-muted-foreground">Médio</span>
+                            <span className="text-[10px] text-muted-foreground">Alto</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={saving}
+                      className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 mt-6 disabled:opacity-50"
+                    >
+                      {saving ? 'Salvando...' : `Registrar ${key}`}
+                    </button>
+                  </div>
                 )}
-                {label.toUpperCase()}
-                {status === 'done' && (
-                  isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />
-                )}
-              </button>
+              </div>
             );
           })}
         </div>
 
-        {/* Expanded saved phase values */}
-        {expandedPhase && perceptionsDone.includes(expandedPhase) && (() => {
-          const savedVals = getPhasePerceptionValues(expandedPhase);
-          if (!savedVals) return null;
-          return (
-            <div className="rounded-xl bg-muted/50 p-3 mb-4">
-              <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
-                {phaseDescriptions[expandedPhase]} — Registrado
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {sliders.map((s) => (
-                  <div key={s.key} className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{s.label}</span>
-                    <span className="text-xs font-mono font-bold text-foreground">{savedVals[s.key]}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
-
         {/* All phases done */}
         {allPhasesDone && (
-          <div className="text-center py-4 mb-2">
+          <div className="text-center py-4 mt-3">
             <p className="text-sm text-foreground font-medium">Todas as fases registradas</p>
             <p className="text-xs text-muted-foreground mt-1">Média do dia calculada e aplicada ao VYR State</p>
           </div>
-        )}
-
-        {/* Locked phase message */}
-        {selectedPhase === null && !allPhasesDone && (
-          <div className="text-center py-4 mb-2">
-            <Lock size={16} className="text-muted-foreground mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Aguardando horário da próxima fase</p>
-          </div>
-        )}
-
-        {/* Sliders for active selected phase */}
-        {selectedPhase && !perceptionsDone.includes(selectedPhase) && (
-          <>
-            <p className="text-xs text-muted-foreground mb-4">{phaseDescriptions[selectedPhase]}</p>
-            <div className="space-y-5">
-              {sliders.map((s) => (
-                <div key={s.key}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-bold text-foreground">{s.label}</span>
-                    <span className="text-sm font-mono font-bold text-foreground">{values[s.key]}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-2">{s.desc}</p>
-                  <input type="range" min={0} max={10} value={values[s.key]}
-                    onChange={(e) => handleChange(s.key, Number(e.target.value))}
-                    className="w-full accent-primary h-1" />
-                  <div className="flex justify-between mt-1">
-                    <span className="text-[10px] text-muted-foreground">Baixo</span>
-                    <span className="text-[10px] text-muted-foreground">Médio</span>
-                    <span className="text-[10px] text-muted-foreground">Alto</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button onClick={handleSubmit} disabled={saving}
-              className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 mt-6 disabled:opacity-50">
-              {saving ? 'Salvando...' : `Registrar ${selectedPhase}`}
-            </button>
-          </>
         )}
       </div>
 
