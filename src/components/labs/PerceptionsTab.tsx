@@ -50,12 +50,7 @@ const PerceptionsTab = () => {
   const allPhasesDone = phases.every((p) => perceptionsDone.includes(p.key));
   const clearDone = perceptionsDone.includes('CLEAR');
 
-  // Auto-expand the current active phase that hasn't been recorded yet
-  useEffect(() => {
-    if (expandedPhase) return;
-    const active = phases.find((p) => isPhaseActive(p.key) && !perceptionsDone.includes(p.key));
-    if (active) setExpandedPhase(active.key);
-  }, [perceptionsDone, expandedPhase]);
+  // No auto-expand — phases only expand on user click
 
   // Load history only when CLEAR is done
   useEffect(() => {
