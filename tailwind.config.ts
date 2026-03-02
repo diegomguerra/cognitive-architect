@@ -76,6 +76,13 @@ export default {
           positive: "hsl(var(--vyr-positive))",
           caution: "hsl(var(--vyr-caution))",
           negative: "hsl(var(--vyr-negative))",
+          score: {
+            otimo: "hsl(var(--vyr-score-otimo))",
+            bom: "hsl(var(--vyr-score-bom))",
+            moderado: "hsl(var(--vyr-score-moderado))",
+            baixo: "hsl(var(--vyr-score-baixo))",
+            critico: "hsl(var(--vyr-score-critico))",
+          },
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",

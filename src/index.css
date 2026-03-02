@@ -29,6 +29,13 @@
     --vyr-clareza: 214 20% 51%;
     --vyr-estabilidade: 162 13% 33%;
 
+    /* VYR Score Levels */
+    --vyr-score-otimo: 161 25% 42%;
+    --vyr-score-bom: 200 22% 44%;
+    --vyr-score-moderado: 42 32% 42%;
+    --vyr-score-baixo: 25 40% 45%;
+    --vyr-score-critico: 0 45% 45%;
+
     /* VYR Semantic */
     --vyr-positive: 161 17% 37%;
     --vyr-caution: 42 32% 42%;

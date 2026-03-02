@@ -1,12 +1,8 @@
+import { getScoreColorVar } from '@/lib/vyr-engine';
+
 interface MiniScoreRingProps {
   score: number;
   size?: number;
-}
-
-function getScoreColor(score: number): string {
-  if (score >= 70) return 'hsl(var(--vyr-accent-action))';
-  if (score >= 40) return 'hsl(var(--vyr-accent-transition))';
-  return '#EF4444';
 }
 
 const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
@@ -14,7 +10,7 @@ const MiniScoreRing = ({ score, size = 36 }: MiniScoreRingProps) => {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
-  const color = getScoreColor(score);
+  const color = `hsl(var(${getScoreColorVar(score)}))`;
 
   return (
     <svg width={size} height={size} className="transform -rotate-90">

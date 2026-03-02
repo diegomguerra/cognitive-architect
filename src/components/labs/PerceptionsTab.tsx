@@ -4,6 +4,7 @@ import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session'
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVYRStore } from '@/hooks/useVYRStore';
+import { recomputeStateWithPerceptions } from '@/lib/vyr-recompute';
 import { toast } from 'sonner';
 
 const phases = [
@@ -81,6 +82,18 @@ const PerceptionsTab = () => {
         }).select();
         return result;
       }, { table: 'action_logs', operation: 'insert' });
+
+      // Recompute VYR State with subjective perceptions
+      try {
+        await recomputeStateWithPerceptions({
+          energy: values.energia,
+          clarity: values.clareza,
+          focus: values.foco,
+          stability: values.estabilidade,
+        });
+      } catch (err) {
+        console.warn('[perceptions] Recompute failed, state may be stale:', err);
+      }
 
       if (mode === 'fase') {
         setSavedPhases((prev) => [...prev, selectedPhase]);

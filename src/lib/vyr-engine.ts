@@ -13,6 +13,11 @@ export interface BiometricData {
   stressLevel?: number;   // 0-100
   tempDeviation?: number; // °C deviation from baseline
   activityLevel?: 'high' | 'moderate' | 'low' | null;
+  // Subjective perceptions (0-10 scale, from daily_reviews)
+  subjectiveEnergy?: number;
+  subjectiveClarity?: number;
+  subjectiveFocus?: number;
+  subjectiveStability?: number;
 }
 
 export interface PillarScore {
@@ -123,6 +128,11 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     energiaInputs.push({ value: zToPillar(zScore(validated.spo2, bl.spo2.mean, bl.spo2.std)), weight: 0.4 });
   }
 
+  if (validated.subjectiveEnergy != null) {
+    const seZ = clamp((validated.subjectiveEnergy - 5) / 2.5, -2, 2);
+    energiaInputs.push({ value: zToPillar(seZ), weight: 0.6 });
+  }
+
   let energia = dynamicWeightedAvg(energiaInputs, 2.5, 3.0);
   // Activity adjustment
   if (validated.activityLevel === 'high') energia = clamp(energia - 0.5, 0, 5);
@@ -144,6 +154,15 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     clarezaInputs.push({ value: zToPillar(-awkZ), weight: 0.5 });
   }
 
+  if (validated.subjectiveClarity != null) {
+    const scZ = clamp((validated.subjectiveClarity - 5) / 2.5, -2, 2);
+    clarezaInputs.push({ value: zToPillar(scZ), weight: 0.5 });
+  }
+  if (validated.subjectiveFocus != null) {
+    const sfZ = clamp((validated.subjectiveFocus - 5) / 2.5, -2, 2);
+    clarezaInputs.push({ value: zToPillar(sfZ), weight: 0.5 });
+  }
+
   const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 3.0);
 
   // === ESTABILIDADE (base 3.0, target weight 2.0) ===
@@ -160,6 +179,11 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
     // Absolute deviation = instability
     const tempZ = zScore(Math.abs(validated.tempDeviation), 0.2, 0.3);
     estabInputs.push({ value: zToPillar(-tempZ), weight: 0.3 });
+  }
+
+  if (validated.subjectiveStability != null) {
+    const ssZ = clamp((validated.subjectiveStability - 5) / 2.5, -2, 2);
+    estabInputs.push({ value: zToPillar(ssZ), weight: 0.5 });
   }
 
   const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 3.0);
@@ -252,6 +276,17 @@ export function getRecommendedAction(pillars: PillarScore, score: number, action
   if (score >= 65) return 'BOOT';
   if (score >= 55) return 'HOLD';
   return 'CLEAR';
+}
+
+/**
+ * Returns the CSS variable name for the score level color
+ */
+export function getScoreColorVar(score: number): string {
+  if (score >= 85) return '--vyr-score-otimo';
+  if (score >= 70) return '--vyr-score-bom';
+  if (score >= 55) return '--vyr-score-moderado';
+  if (score >= 40) return '--vyr-score-baixo';
+  return '--vyr-score-critico';
 }
 
 export function computeState(data: BiometricData, baseline?: BaselineValues): VYRState {
