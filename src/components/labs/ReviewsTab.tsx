@@ -9,9 +9,9 @@ function formatDate(iso: string): string {
 
 const ReviewsTab = () => {
   const navigate = useNavigate();
-  const { dailyReviews } = useVYRStore();
+  const { historyByDay } = useVYRStore();
 
-  if (dailyReviews.length === 0) {
+  if (historyByDay.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <p className="text-sm text-muted-foreground">Nenhuma revisão registrada</p>
@@ -21,21 +21,21 @@ const ReviewsTab = () => {
 
   return (
     <div className="space-y-2">
-      {dailyReviews.map((r) => {
-        const avg = [r.focus_score, r.clarity_score, r.energy_score, r.mood_score]
-          .filter((v): v is number => v != null);
+      {historyByDay.map((entry) => {
+        const avg = [entry.pillars.energia, entry.pillars.clareza, entry.pillars.estabilidade]
+          .filter((v) => v > 0);
         const mean = avg.length > 0 ? (avg.reduce((a, b) => a + b, 0) / avg.length).toFixed(1) : '—';
 
         return (
           <button
-            key={r.id}
-            onClick={() => navigate(`/day-review/${r.day}`)}
+            key={entry.day}
+            onClick={() => navigate(`/day-review/${entry.day}`)}
             className="w-full flex items-center gap-3 rounded-xl bg-card border border-border p-4 text-left transition-transform active:scale-[0.98]"
           >
             <FileText size={18} className="text-muted-foreground flex-shrink-0" />
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-medium text-foreground">{formatDate(r.day)}</span>
-              <p className="text-xs text-muted-foreground mt-0.5">Média: {mean}/10</p>
+              <span className="text-sm font-medium text-foreground">{formatDate(entry.day)}</span>
+              <p className="text-xs text-muted-foreground mt-0.5">Média: {mean}/5</p>
             </div>
             <ChevronRight size={16} className="text-muted-foreground" />
           </button>
