@@ -1,16 +1,17 @@
-import { useState, useEffect } from 'react';
-import { Info, Zap, Eye, Moon, Clock } from 'lucide-react';
-import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
+import { useState, useEffect, useMemo } from 'react';
+import { Info, Zap, Eye, Moon, Clock, Check, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useVYRStore } from '@/hooks/useVYRStore';
-import { recomputeStateWithPerceptions } from '@/lib/vyr-recompute';
+import { isPhaseActive, getPhaseTimeWindow } from '@/lib/vyr-engine';
+import { recomputeStateWithPerceptions, computeDayMeanFromPhases } from '@/lib/vyr-recompute';
+import type { PhaseValues } from '@/lib/vyr-recompute';
 import { toast } from 'sonner';
 
 const phases = [
-  { key: 'BOOT', label: 'Boot', sub: '05h–11h', icon: Zap },
-  { key: 'HOLD', label: 'Hold', sub: '11h–17h', icon: Eye },
-  { key: 'CLEAR', label: 'Clear', sub: '17h–22h', icon: Moon },
+  { key: 'BOOT', label: 'Boot', sub: '05h–11h59', icon: Zap },
+  { key: 'HOLD', label: 'Hold', sub: '12h–17h59', icon: Eye },
+  { key: 'CLEAR', label: 'Clear', sub: '18h–22h', icon: Moon },
 ] as const;
 
 const phaseDescriptions: Record<string, string> = {
@@ -20,10 +21,10 @@ const phaseDescriptions: Record<string, string> = {
 };
 
 const sliders = [
-  { key: 'foco', label: 'FOCO', desc: 'Como está sua capacidade de concentração?', dbKey: 'focus_score' },
-  { key: 'clareza', label: 'CLAREZA', desc: 'Sua mente está clara ou confusa?', dbKey: 'clarity_score' },
-  { key: 'energia', label: 'ENERGIA', desc: 'Qual seu nível de energia física?', dbKey: 'energy_score' },
-  { key: 'estabilidade', label: 'ESTABILIDADE', desc: 'Como está sua estabilidade emocional?', dbKey: 'mood_score' },
+  { key: 'foco', label: 'FOCO', desc: 'Como está sua capacidade de concentração?' },
+  { key: 'clareza', label: 'CLAREZA', desc: 'Sua mente está clara ou confusa?' },
+  { key: 'energia', label: 'ENERGIA', desc: 'Qual seu nível de energia física?' },
+  { key: 'estabilidade', label: 'ESTABILIDADE', desc: 'Como está sua estabilidade emocional?' },
 ];
 
 interface ReviewEntry {
@@ -37,53 +38,80 @@ interface ReviewEntry {
 
 const PerceptionsTab = () => {
   const { session } = useAuth();
-  const { checkpoints } = useVYRStore();
+  const { checkpoints, perceptionsDone, getPhasePerceptionValues, logPerception, refresh } = useVYRStore();
   const [showInfo, setShowInfo] = useState(true);
-  const [mode, setMode] = useState<'geral' | 'fase'>('geral');
-  const [selectedPhase, setSelectedPhase] = useState<'BOOT' | 'HOLD' | 'CLEAR'>('BOOT');
+  const [selectedPhase, setSelectedPhase] = useState<'BOOT' | 'HOLD' | 'CLEAR' | null>(null);
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savedPhases, setSavedPhases] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(sliders.map((s) => [s.key, 5]))
   );
   const [history, setHistory] = useState<ReviewEntry[]>([]);
 
+  const allPhasesDone = phases.every((p) => perceptionsDone.includes(p.key));
+  const clearDone = perceptionsDone.includes('CLEAR');
+
+  // Auto-select the current active phase that hasn't been recorded yet
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (selectedPhase) return;
+    const active = phases.find((p) => isPhaseActive(p.key) && !perceptionsDone.includes(p.key));
+    if (active) setSelectedPhase(active.key as any);
+  }, [perceptionsDone, selectedPhase]);
+
+  // Load history only when CLEAR is done
+  useEffect(() => {
+    if (!session?.user?.id || !clearDone) return;
     supabase.from('daily_reviews').select('day, focus_score, clarity_score, energy_score, mood_score, notes')
       .eq('user_id', session.user.id).order('day', { ascending: false }).limit(14)
       .then(({ data }) => { if (data) setHistory(data); });
-  }, [session?.user?.id]);
+  }, [session?.user?.id, clearDone]);
+
+  // Compute day mean when all 3 phases are done
+  useEffect(() => {
+    if (!allPhasesDone) return;
+    const allValues: Record<string, PhaseValues> = {};
+    for (const p of phases) {
+      const vals = getPhasePerceptionValues(p.key);
+      if (vals) allValues[p.key] = vals as PhaseValues;
+    }
+    if (Object.keys(allValues).length === 3) {
+      computeDayMeanFromPhases(allValues)
+        .then(() => refresh())
+        .catch((err) => console.warn('[perceptions] Day mean failed:', err));
+    }
+  }, [allPhasesDone, getPhasePerceptionValues, refresh]);
 
   const handleChange = (key: string, val: number) => {
     setValues((prev) => ({ ...prev, [key]: val }));
   };
 
+  const handlePhaseClick = (phaseKey: string) => {
+    const isDone = perceptionsDone.includes(phaseKey);
+    if (isDone) {
+      // Toggle expand to show saved values
+      setExpandedPhase((prev) => prev === phaseKey ? null : phaseKey);
+      return;
+    }
+
+    if (!isPhaseActive(phaseKey)) {
+      const window = getPhaseTimeWindow(phaseKey);
+      toast.error(`${phaseKey} disponível no horário ${window.label}`);
+      return;
+    }
+
+    setSelectedPhase(phaseKey as any);
+    setExpandedPhase(null);
+    setValues(Object.fromEntries(sliders.map((s) => [s.key, 5])));
+  };
+
   const handleSubmit = async () => {
+    if (!selectedPhase) return;
     setSaving(true);
     try {
-      const userId = await requireValidUserId();
-      const today = new Date().toISOString().split('T')[0];
+      // 1. Log perception to action_logs
+      await logPerception(selectedPhase, values);
 
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('daily_reviews').upsert({
-          user_id: userId, day: today,
-          focus_score: values.foco, clarity_score: values.clareza,
-          energy_score: values.energia, mood_score: values.estabilidade,
-        }, { onConflict: 'user_id,day' }).select();
-        return result;
-      }, { table: 'daily_reviews', operation: 'upsert' });
-
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('action_logs').insert({
-          user_id: userId, day: today,
-          action_type: mode === 'fase' ? `perception_${selectedPhase}` : 'perception_general',
-          payload: { values, mode, phase: mode === 'fase' ? selectedPhase : null },
-        }).select();
-        return result;
-      }, { table: 'action_logs', operation: 'insert' });
-
-      // Recompute VYR State with subjective perceptions
+      // 2. Recompute VYR State with current values
       try {
         await recomputeStateWithPerceptions({
           energy: values.energia,
@@ -92,16 +120,17 @@ const PerceptionsTab = () => {
           stability: values.estabilidade,
         });
       } catch (err) {
-        console.warn('[perceptions] Recompute failed, state may be stale:', err);
+        console.warn('[perceptions] Recompute failed:', err);
       }
 
-      if (mode === 'fase') {
-        setSavedPhases((prev) => [...prev, selectedPhase]);
-        const nextPhase = phases.find((p) => !savedPhases.includes(p.key) && p.key !== selectedPhase);
-        if (nextPhase) setSelectedPhase(nextPhase.key as any);
-      }
+      toast.success(`${selectedPhase} registrado`);
 
-      toast.success(mode === 'fase' ? `${selectedPhase} registrado` : 'Percepção geral registrada');
+      // 3. Select next available phase
+      const nextPhase = phases.find(
+        (p) => !perceptionsDone.includes(p.key) && p.key !== selectedPhase && isPhaseActive(p.key)
+      );
+      setSelectedPhase(nextPhase ? (nextPhase.key as any) : null);
+      setValues(Object.fromEntries(sliders.map((s) => [s.key, 5])));
     } catch (err) {
       console.error('[perceptions] Save failed:', err);
       toast.error('Erro ao salvar percepção');
@@ -110,7 +139,11 @@ const PerceptionsTab = () => {
     }
   };
 
-  const allPhasesSaved = phases.every((p) => savedPhases.includes(p.key));
+  const getPhaseStatus = (phaseKey: string) => {
+    if (perceptionsDone.includes(phaseKey)) return 'done';
+    if (isPhaseActive(phaseKey)) return 'active';
+    return 'locked';
+  };
 
   return (
     <div className="space-y-4">
@@ -125,8 +158,9 @@ const PerceptionsTab = () => {
             <button onClick={() => setShowInfo(false)} className="text-xs text-muted-foreground hover:text-foreground">Fechar</button>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-            O algoritmo VYR combina <span className="text-foreground font-medium">dados biométricos</span> com suas{' '}
-            <span className="text-foreground font-medium">percepções subjetivas</span> para calcular seu estado cognitivo real.
+            Registre suas percepções em cada fase do dia. O VYR combina{' '}
+            <span className="text-foreground font-medium">dados biométricos</span> com suas{' '}
+            <span className="text-foreground font-medium">percepções subjetivas</span> para calibrar seu estado cognitivo.
           </p>
           <div className="flex justify-center gap-6 mb-3">
             {phases.map(({ key, label, sub, icon: Icon }) => (
@@ -142,52 +176,86 @@ const PerceptionsTab = () => {
         </div>
       )}
 
-      {/* CognitivePerformanceCard */}
-      <div className="rounded-2xl bg-card border border-border p-4" style={{ borderColor: 'hsl(var(--border) / 0.4)' }}>
+      {/* Phase Selector */}
+      <div className="rounded-2xl bg-card border border-border p-4">
         <h3 className="text-xs uppercase tracking-[0.15em] font-semibold text-foreground mb-3">
           Performance Cognitiva
         </h3>
 
         <div className="flex gap-2 mb-4">
-          <button onClick={() => setMode('geral')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${mode === 'geral' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-            Geral do dia
-          </button>
-          <button onClick={() => setMode('fase')}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${mode === 'fase' ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
-            Por fase
-          </button>
+          {phases.map(({ key, label, icon: Icon }) => {
+            const status = getPhaseStatus(key);
+            const isSelected = selectedPhase === key && status === 'active';
+            const isExpanded = expandedPhase === key;
+
+            return (
+              <button
+                key={key}
+                onClick={() => handlePhaseClick(key)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  isSelected ? 'bg-foreground text-background'
+                  : status === 'done' ? 'bg-muted/80 text-foreground'
+                  : status === 'locked' ? 'bg-muted/40 text-muted-foreground'
+                  : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {status === 'done' ? (
+                  <Check size={12} className="text-vyr-positive" />
+                ) : status === 'locked' ? (
+                  <Lock size={12} />
+                ) : (
+                  <Icon size={12} />
+                )}
+                {label.toUpperCase()}
+                {status === 'done' && (
+                  isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        {mode === 'fase' && (
-          <>
-            <div className="flex gap-2 mb-2">
-              {phases.map(({ key, label }) => {
-                const isSaved = savedPhases.includes(key);
-                return (
-                  <button key={key} onClick={() => !isSaved && setSelectedPhase(key as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      selectedPhase === key && !isSaved ? 'bg-foreground text-background'
-                      : isSaved ? 'bg-muted text-muted-foreground line-through opacity-60'
-                      : 'bg-muted text-muted-foreground'
-                    }`}>
-                    {isSaved ? `✓ ${label.toUpperCase()}` : label.toUpperCase()}
-                  </button>
-                );
-              })}
-            </div>
-            {!allPhasesSaved && <p className="text-xs text-muted-foreground mb-4">{phaseDescriptions[selectedPhase]}</p>}
-            {allPhasesSaved && (
-              <div className="text-center py-4 mb-4">
-                <p className="text-sm text-foreground font-medium">Todas as fases registradas ✓</p>
-                <button onClick={() => setSavedPhases([])} className="text-xs text-primary mt-1">Refazer registros</button>
+        {/* Expanded saved phase values */}
+        {expandedPhase && perceptionsDone.includes(expandedPhase) && (() => {
+          const savedVals = getPhasePerceptionValues(expandedPhase);
+          if (!savedVals) return null;
+          return (
+            <div className="rounded-xl bg-muted/50 p-3 mb-4">
+              <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground mb-2">
+                {phaseDescriptions[expandedPhase]} — Registrado
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {sliders.map((s) => (
+                  <div key={s.key} className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">{s.label}</span>
+                    <span className="text-xs font-mono font-bold text-foreground">{savedVals[s.key]}</span>
+                  </div>
+                ))}
               </div>
-            )}
-          </>
+            </div>
+          );
+        })()}
+
+        {/* All phases done */}
+        {allPhasesDone && (
+          <div className="text-center py-4 mb-2">
+            <p className="text-sm text-foreground font-medium">Todas as fases registradas</p>
+            <p className="text-xs text-muted-foreground mt-1">Média do dia calculada e aplicada ao VYR State</p>
+          </div>
         )}
 
-        {!(mode === 'fase' && allPhasesSaved) && (
+        {/* Locked phase message */}
+        {selectedPhase === null && !allPhasesDone && (
+          <div className="text-center py-4 mb-2">
+            <Lock size={16} className="text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Aguardando horário da próxima fase</p>
+          </div>
+        )}
+
+        {/* Sliders for active selected phase */}
+        {selectedPhase && !perceptionsDone.includes(selectedPhase) && (
           <>
+            <p className="text-xs text-muted-foreground mb-4">{phaseDescriptions[selectedPhase]}</p>
             <div className="space-y-5">
               {sliders.map((s) => (
                 <div key={s.key}>
@@ -209,19 +277,19 @@ const PerceptionsTab = () => {
             </div>
             <button onClick={handleSubmit} disabled={saving}
               className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 mt-6 disabled:opacity-50">
-              {saving ? 'Salvando...' : mode === 'fase' ? `Registrar ${selectedPhase}` : 'Registrar percepção geral'}
+              {saving ? 'Salvando...' : `Registrar ${selectedPhase}`}
             </button>
           </>
         )}
       </div>
 
-      {/* PhaseHistoryCard */}
-      {history.length > 0 && (
+      {/* History — only after CLEAR done */}
+      {clearDone && history.length > 0 && (
         <div className="rounded-2xl bg-card border border-border p-4">
           <h3 className="text-xs uppercase tracking-[0.15em] text-muted-foreground font-medium mb-3">
             Histórico de percepções
           </h3>
-          <p className="text-[10px] text-muted-foreground mb-3">F=Foco, C=Clareza, E=Energia, Es=Estabilidade · Média = resultado final</p>
+          <p className="text-[10px] text-muted-foreground mb-3">F=Foco, C=Clareza, E=Energia, Es=Estabilidade</p>
           <div className="space-y-3">
             {history.map((r) => {
               const vals = [r.focus_score, r.clarity_score, r.energy_score, r.mood_score].filter((v): v is number => v != null);

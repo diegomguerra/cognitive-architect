@@ -218,9 +218,30 @@ export function getLimitingFactor(pillars: PillarScore): string {
 
 export function getCurrentPhase(): 'BOOT' | 'HOLD' | 'CLEAR' {
   const hour = new Date().getHours();
-  if (hour >= 5 && hour < 11) return 'BOOT';
-  if (hour >= 11 && hour < 17) return 'HOLD';
+  if (hour >= 5 && hour < 12) return 'BOOT';
+  if (hour >= 12 && hour < 18) return 'HOLD';
   return 'CLEAR';
+}
+
+export interface PhaseTimeWindow {
+  start: number;
+  end: number;
+  label: string;
+}
+
+export function getPhaseTimeWindow(phase: string): PhaseTimeWindow {
+  switch (phase) {
+    case 'BOOT': return { start: 5, end: 12, label: '05h–11h59' };
+    case 'HOLD': return { start: 12, end: 18, label: '12h–17h59' };
+    case 'CLEAR': return { start: 18, end: 22, label: '18h–22h' };
+    default: return { start: 0, end: 24, label: '00h–24h' };
+  }
+}
+
+export function isPhaseActive(phase: string): boolean {
+  const hour = new Date().getHours();
+  const window = getPhaseTimeWindow(phase);
+  return hour >= window.start && hour < window.end;
 }
 
 /**
@@ -258,19 +279,19 @@ export function getRecommendedAction(pillars: PillarScore, score: number, action
   if (score < 45 || pillars.energia <= 2 || pillars.estabilidade <= 2) return 'CLEAR';
 
   // Morning
-  if (hour >= 5 && hour < 11) {
+  if (hour >= 5 && hour < 12) {
     if (!actionsTaken.includes('BOOT') && (pillars.energia >= 3.5 || score >= 65)) return 'BOOT';
     if (actionsTaken.includes('BOOT')) return 'HOLD';
   }
 
   // Afternoon
-  if (hour >= 11 && hour < 17) {
+  if (hour >= 12 && hour < 18) {
     if (score >= 55 && !actionsTaken.includes('HOLD')) return 'HOLD';
     if (actionsTaken.includes('HOLD')) return 'CLEAR';
   }
 
   // Evening
-  if (hour >= 17) return 'CLEAR';
+  if (hour >= 18) return 'CLEAR';
 
   // Fallback
   if (score >= 65) return 'BOOT';

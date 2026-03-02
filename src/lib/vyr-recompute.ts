@@ -117,6 +117,56 @@ export async function computeAndStoreState(day?: string): Promise<VYRState | nul
   return state;
 }
 
+export interface PhaseValues {
+  foco: number;
+  clareza: number;
+  energia: number;
+  estabilidade: number;
+}
+
+/**
+ * When all 3 phases (BOOT, HOLD, CLEAR) are recorded, compute the arithmetic
+ * mean of the 4 perception params, upsert to daily_reviews, then recompute state.
+ */
+export async function computeDayMeanFromPhases(allValues: Record<string, PhaseValues>) {
+  const userId = await requireValidUserId();
+  const today = new Date().toISOString().split('T')[0];
+
+  const phaseKeys = Object.keys(allValues);
+  if (phaseKeys.length === 0) return;
+
+  const mean = (key: keyof PhaseValues) => {
+    const vals = phaseKeys.map((p) => allValues[p][key]);
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  };
+
+  const focusMean = mean('foco');
+  const clarityMean = mean('clareza');
+  const energyMean = mean('energia');
+  const stabilityMean = mean('estabilidade');
+
+  // Upsert daily_reviews with averaged scores
+  await retryOnAuthErrorLabeled(async () => {
+    const result = await supabase.from('daily_reviews').upsert({
+      user_id: userId,
+      day: today,
+      focus_score: focusMean,
+      clarity_score: clarityMean,
+      energy_score: energyMean,
+      mood_score: stabilityMean,
+    }, { onConflict: 'user_id,day' }).select();
+    return result;
+  }, { table: 'daily_reviews', operation: 'upsert' });
+
+  // Recompute state with the averaged perceptions
+  await recomputeStateWithPerceptions({
+    energy: energyMean,
+    clarity: clarityMean,
+    focus: focusMean,
+    stability: stabilityMean,
+  });
+}
+
 /**
  * Recompute VYR State merging existing biometric raw_input with subjective perceptions.
  * Called when the user submits perceptions in PerceptionsTab.

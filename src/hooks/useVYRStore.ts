@@ -276,6 +276,35 @@ export function useVYRStore() {
 
   const actionsTaken = actionLogs.map((a) => a.action_type);
 
+  // Perception tracking — derive which phases have been recorded today
+  const perceptionsDone = actionLogs
+    .filter((a) => a.action_type.startsWith('perception_'))
+    .map((a) => a.action_type.replace('perception_', ''));
+
+  const getPhasePerceptionValues = useCallback((phase: string) => {
+    const log = actionLogs.find((a) => a.action_type === `perception_${phase}`);
+    return log?.payload?.values as Record<string, number> | undefined;
+  }, [actionLogs]);
+
+  const logPerception = useCallback(async (phase: string, values: Record<string, number>) => {
+    const uid = await requireValidUserId();
+    await retryOnAuthErrorLabeled(async () => {
+      const result = await supabase.from('action_logs').insert({
+        user_id: uid,
+        day: today,
+        action_type: `perception_${phase}`,
+        payload: { values, recorded_at: new Date().toISOString() },
+      }).select();
+      return result;
+    }, { table: 'action_logs', operation: 'insert' });
+    setActionLogs((prev) => [...prev, {
+      id: crypto.randomUUID(),
+      action_type: `perception_${phase}`,
+      payload: { values, recorded_at: new Date().toISOString() },
+      created_at: new Date().toISOString(),
+    }]);
+  }, [today]);
+
   return {
     state,
     hasData,
@@ -283,12 +312,15 @@ export function useVYRStore() {
     historyByDay,
     actionLogs,
     actionsTaken,
+    perceptionsDone,
+    getPhasePerceptionValues,
     checkpoints,
     dailyReviews,
     wearableConnection,
     sachetConfirmation,
     userName,
     logAction,
+    logPerception,
     addCheckpoint,
     dismissConfirmation,
     activateTransition,
