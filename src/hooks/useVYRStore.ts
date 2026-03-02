@@ -5,6 +5,7 @@ import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session'
 import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/lib/vyr-engine';
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
+import { computeAndStoreState } from '@/lib/vyr-recompute';
 
 export interface DayEntry {
   day: string;
@@ -90,31 +91,49 @@ export function useVYRStore() {
     ]);
 
     // History
-    if (statesRes.data && statesRes.data.length > 0) {
-      const history: DayEntry[] = statesRes.data.map((d) => {
-        const p = d.pillars as any;
-        return {
-          day: d.day,
-          score: d.score ?? 0,
-          level: d.level ?? 'Crítico',
-          pillars: { energia: p?.energia ?? 0, clareza: p?.clareza ?? 0, estabilidade: p?.estabilidade ?? 0 },
-          phase: d.phase ?? 'BOOT',
-        };
-      });
-      setHistoryByDay(history);
+    const history: DayEntry[] = (statesRes.data || []).map((d) => {
+      const p = d.pillars as any;
+      return {
+        day: d.day,
+        score: d.score ?? 0,
+        level: d.level ?? 'Crítico',
+        pillars: { energia: p?.energia ?? 0, clareza: p?.clareza ?? 0, estabilidade: p?.estabilidade ?? 0 },
+        phase: d.phase ?? 'BOOT',
+      };
+    });
+    setHistoryByDay(history);
 
-      // Today's state
-      const todayEntry = history.find((h) => h.day === today);
-      if (todayEntry) {
-        setState({
-          score: todayEntry.score,
-          level: todayEntry.level,
-          pillars: todayEntry.pillars,
-          limitingFactor: getLimitingFactor(todayEntry.pillars),
-          phase: (todayEntry.phase as VYRState['phase']) || getCurrentPhase(),
-        });
-        setHasData(true);
+    // Today's state
+    let todayEntry = history.find((h) => h.day === today);
+
+    // If no computed state for today, try to compute from ring_daily_data
+    if (!todayEntry) {
+      try {
+        const computed = await computeAndStoreState(today);
+        if (computed) {
+          todayEntry = {
+            day: today,
+            score: computed.score,
+            level: computed.level,
+            pillars: computed.pillars,
+            phase: computed.phase,
+          };
+          setHistoryByDay((prev) => [todayEntry!, ...prev]);
+        }
+      } catch (err) {
+        console.warn('[useVYRStore] Auto-compute failed:', err);
       }
+    }
+
+    if (todayEntry) {
+      setState({
+        score: todayEntry.score,
+        level: todayEntry.level,
+        pillars: todayEntry.pillars,
+        limitingFactor: getLimitingFactor(todayEntry.pillars),
+        phase: (todayEntry.phase as VYRState['phase']) || getCurrentPhase(),
+      });
+      setHasData(true);
     }
 
     // Actions
@@ -212,6 +231,11 @@ export function useVYRStore() {
       await enableHealthKitBackgroundSync();
       // Trigger first sync immediately after connecting
       const syncOk = await runIncrementalHealthSync('manual');
+      if (syncOk) {
+        try { await computeAndStoreState(); } catch (err) {
+          console.warn('[useVYRStore] Post-connect compute failed:', err);
+        }
+      }
       setWearableConnection({
         provider: 'apple_health',
         status: 'active',
@@ -239,6 +263,12 @@ export function useVYRStore() {
     const ok = await runIncrementalHealthSync('manual');
     if (ok) {
       setWearableConnection((prev) => prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev);
+      // Compute state from freshly synced ring_daily_data before reloading
+      try {
+        await computeAndStoreState();
+      } catch (err) {
+        console.warn('[useVYRStore] Post-sync compute failed:', err);
+      }
       await loadData();
     }
     return ok;

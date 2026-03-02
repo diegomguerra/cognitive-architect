@@ -1,9 +1,9 @@
-// VYR Recompute — Unifies biometric data with subjective perceptions
+// VYR Recompute — Reads ring_daily_data, computes state, writes computed_states
 import { supabase } from '@/integrations/supabase/client';
 import { requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
 import { computeState } from './vyr-engine';
 import { calculateBaseline } from './vyr-baseline';
-import type { BiometricData, BaselineValues } from './vyr-engine';
+import type { BiometricData, VYRState, BaselineValues } from './vyr-engine';
 
 interface SubjectivePerceptions {
   energy: number;    // 0-10
@@ -12,59 +12,157 @@ interface SubjectivePerceptions {
   stability: number; // 0-10
 }
 
+interface RingMetrics {
+  rhr?: number | null;
+  hrv_sdnn?: number | null;
+  hrv_index?: number | null;
+  sleep_duration_hours?: number | null;
+  sleep_quality?: number | null;
+  steps?: number | null;
+  spo2?: number | null;
+  respiratory_rate?: number | null;
+}
+
+/**
+ * Convert ring_daily_data metrics to BiometricData format used by vyr-engine
+ */
+function metricsToBiometric(m: RingMetrics): BiometricData {
+  return {
+    rhr: m.rhr ?? undefined,
+    hrvRawMs: m.hrv_sdnn ?? undefined,
+    hrvIndex: m.hrv_index ?? undefined,
+    sleepDuration: m.sleep_duration_hours ?? undefined,
+    sleepQuality: m.sleep_quality ?? undefined,
+    spo2: m.spo2 ?? undefined,
+  };
+}
+
+async function getBaseline(): Promise<BaselineValues> {
+  const raw = await calculateBaseline();
+  return {
+    rhr: raw.rhr ?? undefined,
+    hrv: raw.hrv ?? undefined,
+    sleepDuration: raw.sleepDuration ?? undefined,
+    sleepQuality: raw.sleepQuality ?? undefined,
+    spo2: raw.spo2 ?? undefined,
+  };
+}
+
+async function upsertComputedState(userId: string, day: string, state: VYRState, rawInput: BiometricData) {
+  await retryOnAuthErrorLabeled(async () => {
+    const result = await supabase.from('computed_states').upsert({
+      user_id: userId,
+      day,
+      score: state.score,
+      level: state.level,
+      pillars: state.pillars as any,
+      phase: state.phase,
+      raw_input: rawInput as any,
+    }, { onConflict: 'user_id,day' }).select();
+    return result;
+  }, { table: 'computed_states', operation: 'upsert' });
+}
+
+/**
+ * Core pipeline: reads ring_daily_data for a given day, computes VYR State,
+ * and writes to computed_states. This is the missing link between wearable
+ * data ingestion and the frontend store.
+ *
+ * Merges with existing subjective perceptions from daily_reviews if available.
+ */
+export async function computeAndStoreState(day?: string): Promise<VYRState | null> {
+  const userId = await requireValidUserId();
+  const targetDay = day ?? new Date().toISOString().split('T')[0];
+
+  // 1. Read biometric data from ring_daily_data
+  const { data: ringRow } = await supabase
+    .from('ring_daily_data')
+    .select('metrics')
+    .eq('user_id', userId)
+    .eq('day', targetDay)
+    .maybeSingle();
+
+  if (!ringRow?.metrics) {
+    console.info('[vyr-recompute] No ring_daily_data for', targetDay);
+    return null;
+  }
+
+  const metrics = ringRow.metrics as unknown as RingMetrics;
+  const biometric = metricsToBiometric(metrics);
+
+  // 2. Merge with subjective perceptions if available
+  const { data: review } = await supabase
+    .from('daily_reviews')
+    .select('energy_score, clarity_score, focus_score, mood_score')
+    .eq('user_id', userId)
+    .eq('day', targetDay)
+    .maybeSingle();
+
+  const enriched: BiometricData = {
+    ...biometric,
+    ...(review?.energy_score != null && { subjectiveEnergy: review.energy_score }),
+    ...(review?.clarity_score != null && { subjectiveClarity: review.clarity_score }),
+    ...(review?.focus_score != null && { subjectiveFocus: review.focus_score }),
+    ...(review?.mood_score != null && { subjectiveStability: review.mood_score }),
+  };
+
+  // 3. Calculate baseline + compute state
+  const baseline = await getBaseline();
+  const state = computeState(enriched, baseline);
+
+  // 4. Persist
+  await upsertComputedState(userId, targetDay, state, enriched);
+
+  console.info('[vyr-recompute] State computed for', targetDay, '→ score:', state.score, state.level);
+  return state;
+}
+
 /**
  * Recompute VYR State merging existing biometric raw_input with subjective perceptions.
- * Fetches today's computed_state, enriches with perceptions, recalculates, and upserts.
+ * Called when the user submits perceptions in PerceptionsTab.
  */
 export async function recomputeStateWithPerceptions(perceptions: SubjectivePerceptions) {
   const userId = await requireValidUserId();
   const today = new Date().toISOString().split('T')[0];
 
-  // 1. Fetch existing raw_input from computed_states
-  const { data: existing } = await supabase
-    .from('computed_states')
-    .select('raw_input')
+  // 1. Try to get biometric data from ring_daily_data first, fallback to existing raw_input
+  let biometric: BiometricData = {};
+
+  const { data: ringRow } = await supabase
+    .from('ring_daily_data')
+    .select('metrics')
     .eq('user_id', userId)
     .eq('day', today)
     .maybeSingle();
 
-  const rawBiometric = (existing?.raw_input as Record<string, any>) || {};
+  if (ringRow?.metrics) {
+    biometric = metricsToBiometric(ringRow.metrics as unknown as RingMetrics);
+  } else {
+    // Fallback: use existing raw_input from computed_states
+    const { data: existing } = await supabase
+      .from('computed_states')
+      .select('raw_input')
+      .eq('user_id', userId)
+      .eq('day', today)
+      .maybeSingle();
+    biometric = (existing?.raw_input as Record<string, any>) || {};
+  }
 
   // 2. Merge biometric data with subjective perceptions
-  const enrichedData: BiometricData = {
-    ...rawBiometric,
+  const enriched: BiometricData = {
+    ...biometric,
     subjectiveEnergy: perceptions.energy,
     subjectiveClarity: perceptions.clarity,
     subjectiveFocus: perceptions.focus,
     subjectiveStability: perceptions.stability,
   };
 
-  // 3. Calculate baseline
-  const baselineRaw = await calculateBaseline();
-  const baseline: BaselineValues = {
-    rhr: baselineRaw.rhr ?? undefined,
-    hrv: baselineRaw.hrv ?? undefined,
-    sleepDuration: baselineRaw.sleepDuration ?? undefined,
-    sleepQuality: baselineRaw.sleepQuality ?? undefined,
-    spo2: baselineRaw.spo2 ?? undefined,
-  };
+  // 3. Calculate baseline + compute state
+  const baseline = await getBaseline();
+  const state = computeState(enriched, baseline);
 
-  // 4. Compute unified state
-  const state = computeState(enrichedData, baseline);
-
-  // 5. Upsert to computed_states with enriched raw_input
-  await retryOnAuthErrorLabeled(async () => {
-    const result = await supabase.from('computed_states').upsert({
-      user_id: userId,
-      day: today,
-      score: state.score,
-      level: state.level,
-      pillars: state.pillars as any,
-      phase: state.phase,
-      raw_input: enrichedData as any,
-    }, { onConflict: 'user_id,day' }).select();
-    return result;
-  }, { table: 'computed_states', operation: 'upsert' });
+  // 4. Persist
+  await upsertComputedState(userId, today, state, enriched);
 
   return state;
 }
