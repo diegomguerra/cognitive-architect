@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Heart, Activity, Moon, Footprints, Wind, Droplets } from 'lucide-react';
+import { Heart, Activity, Moon, Footprints, Wind, Droplets, Gauge, Brain } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Metrics {
+  hr_avg: number | null;
   rhr: number | null;
+  heart_rate: number | null;
   hrv_sdnn: number | null;
+  hrv_index: number | null;
+  stress_level: number | null;
   sleep_duration_hours: number | null;
   sleep_quality: number | null;
   steps: number | null;
@@ -47,19 +51,23 @@ const BiomarkerDataCard = () => {
     );
   }
 
+  const fcValue = metrics.hr_avg ?? metrics.heart_rate ?? metrics.rhr;
+
   const items = [
-    { icon: Heart, label: 'FC Repouso', value: metrics.rhr, unit: 'bpm', color: 'text-red-400' },
+    { icon: Heart, label: 'FC Média', value: fcValue, unit: 'bpm', color: 'text-red-400' },
     { icon: Activity, label: 'HRV', value: metrics.hrv_sdnn, unit: 'ms', color: 'text-emerald-400' },
+    { icon: Brain, label: 'HRV Index', value: metrics.hrv_index, unit: '', color: 'text-violet-400' },
     { icon: Moon, label: 'Sono', value: metrics.sleep_duration_hours, unit: 'h', color: 'text-indigo-400' },
     { icon: Footprints, label: 'Passos', value: metrics.steps, unit: '', color: 'text-amber-400' },
     { icon: Droplets, label: 'SpO₂', value: metrics.spo2, unit: '%', color: 'text-sky-400' },
+    { icon: Gauge, label: 'Estresse', value: metrics.stress_level, unit: '', color: 'text-orange-400' },
     { icon: Wind, label: 'Freq. Resp.', value: metrics.respiratory_rate, unit: 'rpm', color: 'text-teal-400' },
   ];
 
   return (
     <div className="rounded-2xl bg-card border border-border p-4">
       <h3 className="text-sm font-semibold text-foreground mb-3">Dados Recebidos</h3>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-2">
         {items.map(({ icon: Icon, label, value, unit, color }) => (
           <div key={label} className="flex flex-col items-center gap-1 p-2 rounded-xl bg-muted/50">
             <Icon size={16} className={color} />
