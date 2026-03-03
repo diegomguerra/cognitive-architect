@@ -293,9 +293,10 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   // @capgo/capacitor-health: only steps & sleep
   // VYRHealthBridge.readAnchored: rhr, hrv, spo2, respiratoryRate
-  const [sleepData, stepsData, rhrBridge, hrvBridge, spo2Bridge, rrBridge] = await Promise.all([
+  const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge, rrBridge] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
+    Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
     VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
@@ -305,6 +306,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   console.info('[healthkit] sync samples count', {
     sleep: sleepData.samples.length,
     steps: stepsData.samples.length,
+    hr: hrData.samples.length,
     rhr: rhrBridge.samples.length,
     hrv: hrvBridge.samples.length,
     spo2: spo2Bridge.samples.length,
@@ -320,15 +322,21 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
   };
 
+  // Heart rate average from @capgo samples
+  const hrVals = hrData.samples.map(s => s.value).filter(v => !isNaN(v) && v > 0);
+  const avgHr = hrVals.length > 0 ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : undefined;
+
   const avgRhr = bridgeAvg(rhrBridge.samples);
   const avgHrv = bridgeAvg(hrvBridge.samples);
   const avgSpo2 = bridgeAvg(spo2Bridge.samples);
   const avgRR = bridgeAvg(rrBridge.samples);
 
   const metrics = {
+    hr_avg: avgHr ? Math.round(avgHr) : null,
     rhr: avgRhr ? Math.round(avgRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
+    stress_level: avgHrv ? Math.round(100 - convertHRVtoScale(avgHrv)) : null,
     sleep_duration_hours: Math.round(durationHours * 10) / 10,
     sleep_quality: sleepQuality,
     steps: totalSteps,

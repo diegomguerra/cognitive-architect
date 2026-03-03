@@ -297,9 +297,44 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
 
         if let c = sample as? HKCategorySample {
             data["value"] = c.value
+            if c.categoryType == HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+                data["sleepState"] = sleepStateString(for: c.value)
+            }
         }
 
         return data
+    }
+
+    private func sleepStateString(for value: Int) -> String {
+        if #available(iOS 16.0, *) {
+            switch HKCategoryValueSleepAnalysis(rawValue: value) {
+            case .asleepDeep:
+                return "deep"
+            case .asleepREM:
+                return "rem"
+            case .asleepCore:
+                return "core"
+            case .awake:
+                return "awake"
+            case .inBed:
+                return "inBed"
+            case .asleepUnspecified:
+                return "light"
+            default:
+                return "unknown"
+            }
+        } else {
+            switch HKCategoryValueSleepAnalysis(rawValue: value) {
+            case .asleep:
+                return "light"
+            case .awake:
+                return "awake"
+            case .inBed:
+                return "inBed"
+            default:
+                return "unknown"
+            }
+        }
     }
 
     private func unitAwareValue(for sample: HKQuantitySample) -> Double {
@@ -311,7 +346,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         case HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN):
             return sample.quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
         case HKQuantityType.quantityType(forIdentifier: .oxygenSaturation):
-            return sample.quantity.doubleValue(for: HKUnit.percent())
+            return sample.quantity.doubleValue(for: HKUnit.percent()) * 100
         case HKQuantityType.quantityType(forIdentifier: .respiratoryRate):
             return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
         case HKQuantityType.quantityType(forIdentifier: .bodyTemperature):
