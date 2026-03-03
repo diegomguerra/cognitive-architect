@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Heart, Activity, Moon, Footprints, Wind, Droplets } from 'lucide-react';
+import { Heart, Activity, Moon, Footprints, Wind, Droplets, Gauge, Brain } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
