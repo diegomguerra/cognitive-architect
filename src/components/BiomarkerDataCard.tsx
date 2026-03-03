@@ -4,8 +4,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Metrics {
+  hr_avg: number | null;
   rhr: number | null;
+  heart_rate: number | null;
   hrv_sdnn: number | null;
+  hrv_index: number | null;
+  stress_level: number | null;
   sleep_duration_hours: number | null;
   sleep_quality: number | null;
   steps: number | null;
