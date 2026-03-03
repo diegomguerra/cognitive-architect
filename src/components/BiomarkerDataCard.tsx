@@ -67,7 +67,7 @@ const BiomarkerDataCard = () => {
   return (
     <div className="rounded-2xl bg-card border border-border p-4">
       <h3 className="text-sm font-semibold text-foreground mb-3">Dados Recebidos</h3>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-2">
         {items.map(({ icon: Icon, label, value, unit, color }) => (
           <div key={label} className="flex flex-col items-center gap-1 p-2 rounded-xl bg-muted/50">
             <Icon size={16} className={color} />
