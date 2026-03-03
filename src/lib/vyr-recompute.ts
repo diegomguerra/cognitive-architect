@@ -13,9 +13,11 @@ interface SubjectivePerceptions {
 }
 
 interface RingMetrics {
+  hr_avg?: number | null;
   rhr?: number | null;
   hrv_sdnn?: number | null;
   hrv_index?: number | null;
+  stress_level?: number | null;
   sleep_duration_hours?: number | null;
   sleep_quality?: number | null;
   steps?: number | null;
@@ -31,6 +33,7 @@ function metricsToBiometric(m: RingMetrics): BiometricData {
     rhr: m.rhr ?? undefined,
     hrvRawMs: m.hrv_sdnn ?? undefined,
     hrvIndex: m.hrv_index ?? undefined,
+    stressLevel: m.stress_level ?? undefined,
     sleepDuration: m.sleep_duration_hours ?? undefined,
     sleepQuality: m.sleep_quality ?? undefined,
     spo2: m.spo2 ?? undefined,

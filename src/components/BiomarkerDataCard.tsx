@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Heart, Activity, Moon, Footprints, Wind, Droplets, Gauge, Brain } from 'lucide-react';
+import { Heart, Activity, Moon, Footprints, Wind, Droplets, Gauge, Brain, BedDouble } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -55,12 +55,14 @@ const BiomarkerDataCard = () => {
 
   const items = [
     { icon: Heart, label: 'FC Média', value: fcValue, unit: 'bpm', color: 'text-red-400' },
+    { icon: Heart, label: 'FC Repouso', value: metrics.rhr, unit: 'bpm', color: 'text-rose-400' },
     { icon: Activity, label: 'HRV', value: metrics.hrv_sdnn, unit: 'ms', color: 'text-emerald-400' },
     { icon: Brain, label: 'HRV Index', value: metrics.hrv_index, unit: '', color: 'text-violet-400' },
     { icon: Moon, label: 'Sono', value: metrics.sleep_duration_hours, unit: 'h', color: 'text-indigo-400' },
+    { icon: BedDouble, label: 'Qual. Sono', value: metrics.sleep_quality, unit: '%', color: 'text-violet-400' },
     { icon: Footprints, label: 'Passos', value: metrics.steps, unit: '', color: 'text-amber-400' },
     { icon: Droplets, label: 'SpO₂', value: metrics.spo2, unit: '%', color: 'text-sky-400' },
-    { icon: Gauge, label: 'Estresse', value: metrics.stress_level, unit: '', color: 'text-orange-400' },
+    { icon: Gauge, label: 'Estresse', value: metrics.stress_level, unit: '%', color: 'text-orange-400' },
     { icon: Wind, label: 'Freq. Resp.', value: metrics.respiratory_rate, unit: 'rpm', color: 'text-teal-400' },
   ];
 
