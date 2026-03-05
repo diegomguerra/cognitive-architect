@@ -103,7 +103,7 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
     try {
       await VYRHealthBridge.requestAuthorization({
         readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation'],
-        writeTypes: [],
+        writeTypes: ['bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic'],
       });
     } catch (bridgeErr: any) {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
