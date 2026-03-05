@@ -19,7 +19,7 @@ export const HEALTH_WRITE_TYPES: HealthDataType[] = [
 
 // Types read via VYRHealthBridge.readAnchored (not supported by @capgo plugin)
 export const BRIDGE_READ_TYPES = [
-  'restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate',
+  'restingHeartRate', 'heartRateVariability', 'oxygenSaturation',
 ] as const;
 
 // Types handled exclusively by the Swift bridge for writes
@@ -102,7 +102,7 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
 
     try {
       await VYRHealthBridge.requestAuthorization({
-        readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation', 'respiratoryRate'],
+        readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation'],
         writeTypes: [],
       });
     } catch (bridgeErr: any) {
@@ -292,15 +292,14 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
   // @capgo/capacitor-health: only steps & sleep
-  // VYRHealthBridge.readAnchored: rhr, hrv, spo2, respiratoryRate
-  const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge, rrBridge] = await Promise.all([
+  // VYRHealthBridge.readAnchored: rhr, hrv, spo2
+  const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
     VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
-    VYRHealthBridge.readAnchored({ type: 'respiratoryRate', limit: 500 }).catch(() => emptyBridge),
   ]);
 
   console.info('[healthkit] sync samples count', {
@@ -310,7 +309,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     rhr: rhrBridge.samples.length,
     hrv: hrvBridge.samples.length,
     spo2: spo2Bridge.samples.length,
-    rr: rrBridge.samples.length,
   });
 
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
@@ -329,7 +327,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const avgRhr = bridgeAvg(rhrBridge.samples);
   const avgHrv = bridgeAvg(hrvBridge.samples);
   const avgSpo2 = bridgeAvg(spo2Bridge.samples);
-  const avgRR = bridgeAvg(rrBridge.samples);
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
@@ -341,7 +338,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     sleep_quality: sleepQuality,
     steps: totalSteps,
     spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
-    respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
   };
 
   const result = await retryOnAuthErrorLabeled(async () => {

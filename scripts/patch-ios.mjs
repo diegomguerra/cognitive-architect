@@ -30,7 +30,7 @@ function patchInfoPlist() {
 
   const healthDescriptions = `
 	<key>NSHealthShareUsageDescription</key>
-	<string>VYR Labs reads your heart rate, resting heart rate, heart rate variability (HRV), sleep analysis, step count, blood oxygen saturation (SpO2), and respiratory rate to calculate your daily cognitive performance score and provide personalized insights.</string>
+	<string>VYR Labs reads your heart rate, resting heart rate, heart rate variability (HRV), sleep analysis, step count, and blood oxygen saturation (SpO2) to calculate your daily cognitive performance score and provide personalized insights.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>VYR Labs writes summary records for steps, body temperature, sleep, heart rate, HRV, blood pressure, VO2Max, SpO2, and active energy burned to Apple Health when permitted.</string>`;
 

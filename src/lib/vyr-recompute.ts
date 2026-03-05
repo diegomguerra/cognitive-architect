@@ -22,7 +22,6 @@ interface RingMetrics {
   sleep_quality?: number | null;
   steps?: number | null;
   spo2?: number | null;
-  respiratory_rate?: number | null;
 }
 
 /**

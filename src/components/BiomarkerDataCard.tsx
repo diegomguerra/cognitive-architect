@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Heart, Activity, Moon, Footprints, Wind, Droplets, Gauge, Brain, BedDouble } from 'lucide-react';
+import { Heart, Activity, Moon, Footprints, Droplets, Gauge, Brain, BedDouble } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -14,7 +14,6 @@ interface Metrics {
   sleep_quality: number | null;
   steps: number | null;
   spo2: number | null;
-  respiratory_rate: number | null;
 }
 
 const BiomarkerDataCard = () => {
@@ -63,7 +62,6 @@ const BiomarkerDataCard = () => {
     { icon: Footprints, label: 'Passos', value: metrics.steps, unit: '', color: 'text-amber-400' },
     { icon: Droplets, label: 'SpO₂', value: metrics.spo2, unit: '%', color: 'text-sky-400' },
     { icon: Gauge, label: 'Estresse', value: metrics.stress_level, unit: '%', color: 'text-orange-400' },
-    { icon: Wind, label: 'Freq. Resp.', value: metrics.respiratory_rate, unit: 'rpm', color: 'text-teal-400' },
   ];
 
   return (

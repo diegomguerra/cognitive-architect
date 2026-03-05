@@ -46,8 +46,6 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             return HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
         case "restingHeartRate":
             return HKObjectType.quantityType(forIdentifier: .restingHeartRate)
-        case "respiratoryRate":
-            return HKObjectType.quantityType(forIdentifier: .respiratoryRate)
         default:
             return nil
         }
@@ -347,8 +345,6 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             return sample.quantity.doubleValue(for: HKUnit.secondUnit(with: .milli))
         case HKQuantityType.quantityType(forIdentifier: .oxygenSaturation):
             return sample.quantity.doubleValue(for: HKUnit.percent()) * 100
-        case HKQuantityType.quantityType(forIdentifier: .respiratoryRate):
-            return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
         case HKQuantityType.quantityType(forIdentifier: .bodyTemperature):
             return sample.quantity.doubleValue(for: HKUnit.degreeCelsius())
         case HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
