@@ -163,30 +163,188 @@ export async function writeBloodPressure(systolic: number, diastolic: number, st
   }
 }
 
+/**
+ * Merge overlapping time intervals to avoid double-counting
+ * (common with wearables like JCVital that report overlapping blocks).
+ */
+function mergeIntervals(intervals: { start: number; end: number }[]): { start: number; end: number }[] {
+  if (intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i].start <= last.end) {
+      last.end = Math.max(last.end, sorted[i].end);
+    } else {
+      merged.push(sorted[i]);
+    }
+  }
+  return merged;
+}
+
 export function calculateSleepQuality(samples: HealthSample[]): { durationHours: number; quality: number } {
+  if (samples.length === 0) return { durationHours: 0, quality: 0 };
+
+  // Separate awake periods within sleep blocks (to subtract later)
+  const awakeSamples = samples.filter((s) => s.sleepState === 'awake');
+  const awakeIntervals = mergeIntervals(
+    awakeSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
+  );
+  const totalAwakeMs = awakeIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
+
+  // Valid sleep samples (excluding awake and inBed)
   const validSamples = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
   if (validSamples.length === 0) return { durationHours: 0, quality: 0 };
 
-  let totalMs = 0;
+  // Merge overlapping sleep intervals
+  const sleepIntervals = mergeIntervals(
+    validSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
+  );
+  const grossSleepMs = sleepIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
+  const netSleepMs = Math.max(0, grossSleepMs - totalAwakeMs);
+
+  if (netSleepMs === 0) return { durationHours: 0, quality: 0 };
+
+  // Calculate stage-specific durations
   let deepMs = 0;
   let remMs = 0;
+  let lightMs = 0;
   for (const s of validSamples) {
     const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    totalMs += ms;
     if (s.sleepState === 'deep') deepMs += ms;
-    if (s.sleepState === 'rem') remMs += ms;
+    else if (s.sleepState === 'rem') remMs += ms;
+    else lightMs += ms; // light or core
   }
-  if (totalMs === 0) return { durationHours: 0, quality: 0 };
+
+  const stageTotal = deepMs + remMs + lightMs;
+  const hasStageBreakdown = stageTotal > 0 && (deepMs > 0 || remMs > 0);
+
+  let quality: number;
+  if (hasStageBreakdown) {
+    // Primary formula: deep weight 1.0, REM weight 2.5
+    quality = Math.min(100, Math.round(((deepMs / stageTotal) + (remMs / stageTotal) * 2.5) * 100));
+  } else {
+    // Fallback without stage breakdown: duration / 8h * 50
+    quality = Math.min(100, Math.round((netSleepMs / (8 * 3600000)) * 50));
+  }
 
   return {
-    durationHours: totalMs / (1000 * 60 * 60),
-    quality: Math.min(100, Math.round(((deepMs / totalMs) + (remMs / totalMs) * 2.5) * 100)),
+    durationHours: netSleepMs / (1000 * 60 * 60),
+    quality,
   };
 }
 
+/**
+ * Convert HRV (ms) to 0-100 logarithmic scale.
+ * 5ms → 0 | 200ms → 100
+ */
 export function convertHRVtoScale(hrvMs: number): number {
   if (hrvMs <= 0) return 0;
-  return Math.min(100, Math.round((Math.log(hrvMs) / Math.log(200)) * 100));
+  const clamped = Math.min(200, Math.max(5, hrvMs));
+  return Math.min(100, Math.round(
+    ((Math.log(clamped) - Math.log(5)) / (Math.log(200) - Math.log(5))) * 100
+  ));
+}
+
+/**
+ * Derive pseudo-HRV (RMSSD) from heart rate samples when wearable
+ * doesn't send HRV to Health Connect but has HR data.
+ *
+ * Requirements:
+ * - Minimum 10 HR samples
+ * - Average spacing between samples ≤ 5 minutes
+ * - HR values between 30-220 bpm
+ *
+ * Returns RMSSD in ms, or undefined if requirements not met.
+ */
+export function derivePseudoHRV(hrSamples: HealthSample[]): number | undefined {
+  // Filter to valid HR range
+  const filtered = hrSamples
+    .filter((s) => s.value >= 30 && s.value <= 220)
+    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+  if (filtered.length < 10) return undefined;
+
+  // Check average spacing ≤ 5 minutes
+  let totalSpacing = 0;
+  for (let i = 1; i < filtered.length; i++) {
+    totalSpacing += new Date(filtered[i].startDate).getTime() - new Date(filtered[i - 1].startDate).getTime();
+  }
+  const avgSpacingMs = totalSpacing / (filtered.length - 1);
+  if (avgSpacingMs > 5 * 60 * 1000) return undefined;
+
+  // Convert BPM → RR intervals (ms)
+  const rrIntervals = filtered.map((s) => 60000 / s.value);
+
+  // Calculate RMSSD (root mean square of successive differences)
+  let sumSqDiff = 0;
+  for (let i = 1; i < rrIntervals.length; i++) {
+    const diff = rrIntervals[i] - rrIntervals[i - 1];
+    sumSqDiff += diff * diff;
+  }
+  const rmssd = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
+
+  return rmssd;
+}
+
+export interface StressContext {
+  avgRhr?: number;
+  sleepHours?: number;
+  avgRespiratoryRate?: number;
+  baseline?: {
+    rhr?: { mean: number };
+    sleep?: { mean: number };
+  };
+}
+
+/**
+ * Compute stress level (0-100) using z-score over ln(RMSSD).
+ *
+ * Falls back to 50 (neutral) if no HRV data available.
+ * Applies contextual modifiers for RHR, sleep deficit, and respiratory rate.
+ */
+export function computeStressLevel(avgHrv: number | undefined, ctx?: StressContext): number {
+  if (avgHrv == null) return 50;
+
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+  // Z-score over ln(RMSSD)
+  const lnHrv = Math.log(clamp(avgHrv, 5, 250));
+  const mean = Math.log(40); // ≈ 3.689 (population baseline)
+  const std = 0.4;
+  const z = clamp((lnHrv - mean) / std, -3, 3);
+
+  // Base stress: z=-3 → 100 (max stress), z=0 → 50, z=+3 → 0
+  let stress = ((-z + 3) / 6) * 100;
+
+  // Contextual modifiers (sum up to +33)
+  if (ctx) {
+    const blRhrMean = ctx.baseline?.rhr?.mean ?? 65;
+    const blSleepMean = ctx.baseline?.sleep?.mean ?? 7;
+
+    // Resting HR modifier: delta > 3 bpm above baseline → +up to 15
+    if (ctx.avgRhr != null) {
+      const delta = ctx.avgRhr - blRhrMean;
+      if (delta > 3) {
+        stress += clamp((delta - 3) * 2, 0, 15);
+      }
+    }
+
+    // Sleep deficit modifier: deficit > 0.5h → +up to 10
+    if (ctx.sleepHours != null) {
+      const deficit = blSleepMean - ctx.sleepHours;
+      if (deficit > 0.5) {
+        stress += clamp(deficit * 4, 0, 10);
+      }
+    }
+
+    // Respiratory rate modifier: RR > 18 → +up to 8
+    if (ctx.avgRespiratoryRate != null && ctx.avgRespiratoryRate > 18) {
+      stress += clamp((ctx.avgRespiratoryRate - 18) * 1.5, 0, 8);
+    }
+  }
+
+  return Math.round(clamp(stress, 0, 100));
 }
 
 function getAnchor(type: string): string | undefined {
@@ -325,15 +483,32 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const avgHr = hrVals.length > 0 ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : undefined;
 
   const avgRhr = bridgeAvg(rhrBridge.samples);
-  const avgHrv = bridgeAvg(hrvBridge.samples);
+  const realHrv = bridgeAvg(hrvBridge.samples);
   const avgSpo2 = bridgeAvg(spo2Bridge.samples);
+
+  // Use real HRV from Health Connect, or derive pseudo-HRV from HR samples
+  const avgHrv = realHrv ?? derivePseudoHRV(hrData.samples);
+
+  // Derive RHR fallback: average of lowest 20% HR samples
+  let computedRhr = avgRhr;
+  if (computedRhr == null && hrVals.length > 0) {
+    const sorted = [...hrVals].sort((a, b) => a - b);
+    const bottom20 = sorted.slice(0, Math.max(1, Math.floor(sorted.length * 0.2)));
+    computedRhr = bottom20.reduce((a, b) => a + b, 0) / bottom20.length;
+  }
+
+  // Compute stress with contextual modifiers
+  const stressLevel = computeStressLevel(avgHrv, {
+    avgRhr: computedRhr,
+    sleepHours: durationHours,
+  });
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
-    rhr: avgRhr ? Math.round(avgRhr) : null,
+    rhr: computedRhr ? Math.round(computedRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
-    stress_level: avgHrv ? Math.round(100 - convertHRVtoScale(avgHrv)) : null,
+    stress_level: stressLevel,
     sleep_duration_hours: Math.round(durationHours * 10) / 10,
     sleep_quality: sleepQuality,
     steps: totalSteps,

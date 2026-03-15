@@ -42,11 +42,11 @@ export interface BaselineValues {
   spo2?: { mean: number; std: number };
 }
 
-// Population fallback baseline
+// Population fallback baseline (used when user has < 3 days of data)
 export const FALLBACK_BASELINE: Required<BaselineValues> = {
-  rhr: { mean: 63, std: 5 },
+  rhr: { mean: 65, std: 10 },
   hrv: { mean: 55, std: 12 },
-  sleepDuration: { mean: 7.0, std: 0.7 },
+  sleepDuration: { mean: 7.0, std: 1.0 },
   sleepQuality: { mean: 60, std: 15 },
   spo2: { mean: 97, std: 1.5 },
 };
