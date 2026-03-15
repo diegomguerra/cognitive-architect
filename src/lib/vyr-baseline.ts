@@ -18,11 +18,31 @@ interface MetricsData {
   spo2?: number | null;
 }
 
-function computeMeanStd(values: number[]): { mean: number; std: number } | null {
+/**
+ * Minimum standard deviation floors per metric.
+ * Prevents z-scores from exploding when data is too homogeneous
+ * (e.g., 7 days of RHR 62-63 → std ≈ 0.5 → z-score explodes).
+ */
+const MIN_STD: Record<string, number> = {
+  rhr: 3,              // bpm — day-to-day physiological variation
+  hrv: 6,              // index 0-100 — natural HRV variation
+  sleepDuration: 0.4,  // hours (24 min) — realistic sleep variation
+  sleepQuality: 8,     // points — margin for oscillation
+  spo2: 0.8,           // % — normal variation
+};
+
+function computeMeanStd(values: number[], metricKey?: string): { mean: number; std: number } | null {
   if (values.length === 0) return null;
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
-  return { mean: Math.round(mean * 100) / 100, std: Math.round(Math.sqrt(variance) * 100) / 100 };
+  let std = Math.sqrt(variance);
+
+  // Apply minimum std floor if available
+  if (metricKey && MIN_STD[metricKey]) {
+    std = Math.max(std, MIN_STD[metricKey]);
+  }
+
+  return { mean: Math.round(mean * 100) / 100, std: Math.round(std * 100) / 100 };
 }
 
 /**
@@ -34,20 +54,20 @@ export function zScore(value: number, mean: number, std: number): number {
 }
 
 /**
- * Calculate 14-day baseline from ring_daily_data.
+ * Calculate 30-day sliding window baseline from ring_daily_data.
  * Falls back to population references if < 3 days of data.
  */
 export async function calculateBaseline(): Promise<BaselineMetrics> {
   const userId = await requireValidUserId();
 
-  const fourteenDaysAgo = new Date();
-  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   const { data: rows, error } = await supabase
     .from('ring_daily_data')
     .select('metrics')
     .eq('user_id', userId)
-    .gte('day', fourteenDaysAgo.toISOString().split('T')[0])
+    .gte('day', thirtyDaysAgo.toISOString().split('T')[0])
     .order('day', { ascending: false });
 
   if (error) {
@@ -69,11 +89,11 @@ export async function calculateBaseline(): Promise<BaselineMetrics> {
   const spo2Vals = metrics.map((m) => m.spo2).filter((v): v is number => v != null);
 
   return {
-    rhr: computeMeanStd(rhrVals),
-    hrv: computeMeanStd(hrvVals),
-    sleepDuration: computeMeanStd(sleepDurVals),
-    sleepQuality: computeMeanStd(sleepQualVals),
-    spo2: computeMeanStd(spo2Vals),
+    rhr: computeMeanStd(rhrVals, 'rhr'),
+    hrv: computeMeanStd(hrvVals, 'hrv'),
+    sleepDuration: computeMeanStd(sleepDurVals, 'sleepDuration'),
+    sleepQuality: computeMeanStd(sleepQualVals, 'sleepQuality'),
+    spo2: computeMeanStd(spo2Vals, 'spo2'),
   };
 }
 
@@ -96,19 +116,23 @@ async function getPopulationBaseline(): Promise<BaselineMetrics> {
     };
   }
 
-  const find = (metrica: string) => {
+  const find = (metrica: string, metricKey: string) => {
     const r = refs.find((ref) => ref.metrica === metrica);
     if (!r) return null;
     const mean = (r.faixa_min + r.faixa_max) / 2;
-    const std = (r.faixa_max - r.faixa_min) / 4; // approximate
+    let std = (r.faixa_max - r.faixa_min) / 4; // approximate
+    // Apply minimum std floor
+    if (MIN_STD[metricKey]) {
+      std = Math.max(std, MIN_STD[metricKey]);
+    }
     return { mean: Math.round(mean * 100) / 100, std: Math.round(std * 100) / 100 };
   };
 
   return {
-    rhr: find('rhr') || { mean: 65, std: 10 },
-    hrv: find('hrv_sdnn') || { mean: 40, std: 15 },
-    sleepDuration: find('sleep_duration') || { mean: 7, std: 1 },
-    sleepQuality: find('sleep_quality') || { mean: 60, std: 15 },
-    spo2: find('spo2') || { mean: 97, std: 1.5 },
+    rhr: find('rhr', 'rhr') || { mean: 65, std: 10 },
+    hrv: find('hrv_sdnn', 'hrv') || { mean: 40, std: 15 },
+    sleepDuration: find('sleep_duration', 'sleepDuration') || { mean: 7, std: 1 },
+    sleepQuality: find('sleep_quality', 'sleepQuality') || { mean: 60, std: 15 },
+    spo2: find('spo2', 'spo2') || { mean: 97, std: 1.5 },
   };
 }

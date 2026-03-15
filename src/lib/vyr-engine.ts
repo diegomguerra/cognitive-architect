@@ -1,5 +1,6 @@
-// VYR State Engine — Core Algorithm v2
+// VYR State Engine — Core Algorithm v3
 // Implements z-score baseline, dynamic weights, rich labels
+// v3: wider z-score range, higher sensitivity, base 2.5 for true center
 
 export interface BiometricData {
   rhr?: number;           // Resting Heart Rate (bpm)
@@ -68,7 +69,7 @@ export function validateWearableData(data: BiometricData): BiometricData {
   return {
     ...data,
     rhr: data.rhr != null ? clamp(data.rhr, 35, 120) : undefined,
-    hrvIndex: data.hrvIndex != null ? clamp(data.hrvIndex, 0, 100) : 
+    hrvIndex: data.hrvIndex != null ? clamp(data.hrvIndex, 0, 100) :
               data.hrvRawMs != null ? normalizeHRV(data.hrvRawMs) : undefined,
     sleepDuration: data.sleepDuration != null ? clamp(data.sleepDuration, 0, 14) : undefined,
     sleepQuality: data.sleepQuality != null ? clamp(data.sleepQuality, 0, 100) : undefined,
@@ -81,18 +82,18 @@ export function validateWearableData(data: BiometricData): BiometricData {
 }
 
 /**
- * Compute z-score clamped to [-2, +2]
+ * Compute z-score clamped to [-2.5, +2.5] (v3: wider range for more sensitivity)
  */
 function zScore(value: number, mean: number, std: number): number {
   if (std < 0.01) return 0;
-  return clamp((value - mean) / std, -2, 2);
+  return clamp((value - mean) / std, -2.5, 2.5);
 }
 
 /**
- * Convert z-score to pillar contribution (range -1.5 to +1.5)
+ * Convert z-score to pillar contribution (v3: multiplier 1.0, range [-2.5, +2.5])
  */
 function zToPillar(z: number): number {
-  return z * 0.75;
+  return z * 1.0;
 }
 
 interface WeightedInput {
@@ -112,7 +113,7 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   const validated = validateWearableData(data);
   const bl = { ...FALLBACK_BASELINE, ...baseline };
 
-  // === ENERGIA (base 3.0, target weight 2.5) ===
+  // === ENERGIA (base 2.5, target weight 2.5) ===
   const energiaInputs: WeightedInput[] = [];
   if (validated.rhr != null && bl.rhr) {
     // Inverted: below mean = good
@@ -129,16 +130,16 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   }
 
   if (validated.subjectiveEnergy != null) {
-    const seZ = clamp((validated.subjectiveEnergy - 5) / 2.5, -2, 2);
+    const seZ = clamp((validated.subjectiveEnergy - 5) / 2.5, -2.5, 2.5);
     energiaInputs.push({ value: zToPillar(seZ), weight: 0.6 });
   }
 
-  let energia = dynamicWeightedAvg(energiaInputs, 2.5, 3.0);
+  let energia = dynamicWeightedAvg(energiaInputs, 2.5, 2.5);
   // Activity adjustment
   if (validated.activityLevel === 'high') energia = clamp(energia - 0.5, 0, 5);
   else if (validated.activityLevel === 'low') energia = clamp(energia + 0.25, 0, 5);
 
-  // === CLAREZA (base 3.0, target weight 2.5) ===
+  // === CLAREZA (base 2.5, target weight 2.5) ===
   const clarezaInputs: WeightedInput[] = [];
   if (validated.sleepRegularity != null) {
     // Inverted: less variation = better
@@ -155,17 +156,17 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   }
 
   if (validated.subjectiveClarity != null) {
-    const scZ = clamp((validated.subjectiveClarity - 5) / 2.5, -2, 2);
+    const scZ = clamp((validated.subjectiveClarity - 5) / 2.5, -2.5, 2.5);
     clarezaInputs.push({ value: zToPillar(scZ), weight: 0.5 });
   }
   if (validated.subjectiveFocus != null) {
-    const sfZ = clamp((validated.subjectiveFocus - 5) / 2.5, -2, 2);
+    const sfZ = clamp((validated.subjectiveFocus - 5) / 2.5, -2.5, 2.5);
     clarezaInputs.push({ value: zToPillar(sfZ), weight: 0.5 });
   }
 
-  const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 3.0);
+  const clareza = dynamicWeightedAvg(clarezaInputs, 2.5, 2.5);
 
-  // === ESTABILIDADE (base 3.0, target weight 2.0) ===
+  // === ESTABILIDADE (base 2.5, target weight 2.0) ===
   const estabInputs: WeightedInput[] = [];
   if (validated.hrvIndex != null && bl.hrv) {
     estabInputs.push({ value: zToPillar(zScore(validated.hrvIndex, bl.hrv.mean, bl.hrv.std)), weight: 1.3 });
@@ -182,11 +183,11 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   }
 
   if (validated.subjectiveStability != null) {
-    const ssZ = clamp((validated.subjectiveStability - 5) / 2.5, -2, 2);
+    const ssZ = clamp((validated.subjectiveStability - 5) / 2.5, -2.5, 2.5);
     estabInputs.push({ value: zToPillar(ssZ), weight: 0.5 });
   }
 
-  const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 3.0);
+  const estabilidade = dynamicWeightedAvg(estabInputs, 2.0, 2.5);
 
   return {
     energia: Math.round(energia * 100) / 100,
@@ -245,25 +246,37 @@ export function isPhaseActive(phase: string): boolean {
 }
 
 /**
- * Rich state labels based on score + dominant pillar
+ * Rich state labels based on score + dominant/limiting pillar (v3: 8×3 = 24 labels)
  */
 export function getRichLabel(score: number, pillars: PillarScore): string {
   const dominant = pillars.energia >= pillars.clareza && pillars.energia >= pillars.estabilidade
     ? 'energia' : pillars.clareza >= pillars.estabilidade ? 'clareza' : 'estabilidade';
 
-  if (score >= 85) {
+  const limiting = getLimitingFactor(pillars);
+
+  if (score >= 90) {
     return dominant === 'energia' ? 'Energia plena' : dominant === 'clareza' ? 'Foco sustentado' : 'Equilíbrio elevado';
+  }
+  if (score >= 80) {
+    return dominant === 'energia' ? 'Energia consolidada' : dominant === 'clareza' ? 'Clareza ampla' : 'Sustentação firme';
   }
   if (score >= 70) {
     return dominant === 'energia' ? 'Energia estável' : dominant === 'clareza' ? 'Clareza disponível' : 'Sustentação adequada';
   }
-  if (score >= 55) {
-    return dominant === 'energia' ? 'Energia moderada' : dominant === 'clareza' ? 'Foco instável' : 'Clareza parcial';
+  if (score >= 60) {
+    return dominant === 'energia' ? 'Energia funcional' : dominant === 'clareza' ? 'Foco parcial' : 'Equilíbrio parcial';
   }
-  if (score >= 45) {
-    return dominant === 'energia' ? 'Reserva baixa' : dominant === 'clareza' ? 'Oscilação detectada' : 'Sustentação necessária';
+  if (score >= 50) {
+    // Use limiting pillar for mid-range context
+    return limiting === 'energia' ? 'Energia moderada' : limiting === 'clareza' ? 'Foco instável' : 'Clareza parcial';
   }
-  return dominant === 'energia' ? 'Esgotamento energético' : dominant === 'clareza' ? 'Instabilidade elevada' : 'Recuperação necessária';
+  if (score >= 40) {
+    return limiting === 'energia' ? 'Reserva baixa' : limiting === 'clareza' ? 'Oscilação detectada' : 'Sustentação necessária';
+  }
+  if (score >= 25) {
+    return limiting === 'energia' ? 'Depleção energética' : limiting === 'clareza' ? 'Instabilidade elevada' : 'Regulação necessária';
+  }
+  return limiting === 'energia' ? 'Esgotamento energético' : limiting === 'clareza' ? 'Dispersão cognitiva' : 'Recuperação necessária';
 }
 
 /**
