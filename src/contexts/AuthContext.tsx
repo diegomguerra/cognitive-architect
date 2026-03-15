@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { Session, User } from '@supabase/supabase-js';
+import { setConnectionActive } from '@/lib/health-lifecycle';
 
 interface AuthContextType {
   session: Session | null;
@@ -50,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    setConnectionActive(false); // Clear health sync flag on logout
     await supabase.auth.signOut();
   };
 

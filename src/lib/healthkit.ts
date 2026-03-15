@@ -523,7 +523,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   if (result.error) return false;
 
   await retryOnAuthErrorLabeled(async () => {
-    const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'connected', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
+    const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'active', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
     return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
   }, { table: 'user_integrations', operation: 'upsert' });
 

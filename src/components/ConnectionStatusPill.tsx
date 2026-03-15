@@ -27,12 +27,12 @@ const ConnectionStatusPill = () => {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const fetch = async () => {
+    const fetchStatus = async () => {
       const { data } = await supabase
         .from('user_integrations')
         .select('provider, status, last_sync_at')
         .eq('user_id', session.user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'connected'])
         .limit(1)
         .maybeSingle();
 
@@ -45,7 +45,7 @@ const ConnectionStatusPill = () => {
       }
     };
 
-    fetch();
+    fetchStatus();
   }, [session?.user?.id]);
 
   if (!wearable) {

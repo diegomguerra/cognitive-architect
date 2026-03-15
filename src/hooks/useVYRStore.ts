@@ -6,6 +6,7 @@ import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/li
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
 import { computeAndStoreState } from '@/lib/vyr-recompute';
+import { bootstrapHealthSync, setupAppLifecycleListeners, setConnectionActive, isConnectionActive } from '@/lib/health-lifecycle';
 
 export interface DayEntry {
   day: string;
@@ -147,12 +148,31 @@ export function useVYRStore() {
 
     // Wearable
     if (integrationRes.data) {
+      const connStatus = integrationRes.data.status;
+      const isActive = connStatus === 'active' || connStatus === 'connected';
+
       setWearableConnection({
         provider: integrationRes.data.provider,
-        status: integrationRes.data.status,
+        status: connStatus,
         lastSyncAt: integrationRes.data.last_sync_at,
         scopes: integrationRes.data.scopes || [],
       });
+
+      // Auto-reconnect: re-enable background sync + auto-sync if connection was active
+      if (isActive) {
+        setConnectionActive(true);
+        // Fire-and-forget: bootstrap in background, don't block loadData
+        bootstrapHealthSync().then((synced) => {
+          if (synced) {
+            setWearableConnection((prev) =>
+              prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev
+            );
+          }
+        });
+      }
+    } else if (isConnectionActive()) {
+      // DB says no integration but localStorage flag is on — clean up
+      setConnectionActive(false);
     }
 
     // Name
@@ -163,7 +183,14 @@ export function useVYRStore() {
     setLoading(false);
   }, [userId, today]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+    // Register Capacitor app lifecycle listeners (resume/pause) once
+    setupAppLifecycleListeners(() => {
+      // On sync complete after resume, reload data to refresh UI
+      loadData();
+    });
+  }, [loadData]);
 
   // Actions
   const logAction = useCallback(async (phase: string, payload?: object) => {
@@ -236,6 +263,7 @@ export function useVYRStore() {
           console.warn('[useVYRStore] Post-connect compute failed:', err);
         }
       }
+      setConnectionActive(true);
       setWearableConnection({
         provider: 'apple_health',
         status: 'active',
@@ -256,6 +284,7 @@ export function useVYRStore() {
         .select();
       return result;
     }, { table: 'user_integrations', operation: 'update' });
+    setConnectionActive(false);
     setWearableConnection(null);
   }, []);
 
