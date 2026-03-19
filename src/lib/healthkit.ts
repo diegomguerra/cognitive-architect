@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
+import { computeAndStoreState } from './vyr-recompute';
 
 // Types the @capgo/capacitor-health plugin actually supports
 export const HEALTH_READ_TYPES: HealthDataType[] = [
@@ -626,6 +627,13 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const nowIso = now.toISOString();
   for (const dt of [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES]) {
     setLastSyncTimestamp(dt, nowIso);
+  }
+
+  // Auto-compute VYR State after every sync (ensures score stays current)
+  try {
+    await computeAndStoreState(today);
+  } catch (e) {
+    console.warn('[healthkit] post-sync computeAndStoreState failed:', e);
   }
 
   return true;

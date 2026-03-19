@@ -100,9 +100,6 @@ export function useVYRStore() {
       await enableHealthKitBackgroundSync();
 
       const syncOk = await runIncrementalHealthSync('manual');
-      if (syncOk) {
-        try { await computeAndStoreState(); } catch {}
-      }
 
       setConnectionActive(true);
       setWearableConnection({
@@ -305,13 +302,8 @@ export function useVYRStore() {
         return result;
       }, { table: 'user_integrations', operation: 'upsert' });
       await enableHealthKitBackgroundSync();
-      // Trigger first sync immediately after connecting
+      // Trigger first sync immediately after connecting (also computes VYR state)
       const syncOk = await runIncrementalHealthSync('manual');
-      if (syncOk) {
-        try { await computeAndStoreState(); } catch (err) {
-          console.warn('[useVYRStore] Post-connect compute failed:', err);
-        }
-      }
       setConnectionActive(true);
       setWearableConnection({
         provider: 'apple_health',
@@ -341,12 +333,6 @@ export function useVYRStore() {
     const ok = await runIncrementalHealthSync('manual');
     if (ok) {
       setWearableConnection((prev) => prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev);
-      // Compute state from freshly synced ring_daily_data before reloading
-      try {
-        await computeAndStoreState();
-      } catch (err) {
-        console.warn('[useVYRStore] Post-sync compute failed:', err);
-      }
       await loadData();
     }
     return ok;

@@ -7,7 +7,6 @@
  */
 
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync } from './healthkit';
-import { computeAndStoreState } from './vyr-recompute';
 
 const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes between auto-syncs
 const LAST_AUTO_SYNC_KEY = 'vyr.health.lastAutoSync';
@@ -55,11 +54,6 @@ export async function bootstrapHealthSync(): Promise<boolean> {
       const ok = await runIncrementalHealthSync('manual');
       if (ok) {
         markAutoSynced();
-        try {
-          await computeAndStoreState();
-        } catch (err) {
-          console.warn('[health-lifecycle] Post-sync compute failed:', err);
-        }
       }
       return ok;
     }
