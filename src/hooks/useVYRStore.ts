@@ -72,6 +72,52 @@ export function useVYRStore() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  /**
+   * Auto-connect to Apple Health without user interaction.
+   * Requests HealthKit permissions, saves integration, enables background sync,
+   * and triggers first sync. Runs silently — no error toasts.
+   */
+  const autoConnect = useCallback(async (uid: string) => {
+    try {
+      const available = await isHealthKitAvailable();
+      if (!available) return;
+
+      const granted = await requestHealthKitPermissions();
+      if (!granted) return;
+
+      const scopes = ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'];
+
+      await retryOnAuthErrorLabeled(async () => {
+        const result = await supabase.from('user_integrations').upsert({
+          user_id: uid,
+          provider: 'apple_health',
+          status: 'active',
+          scopes,
+        }, { onConflict: 'user_id,provider' } as any).select();
+        return result;
+      }, { table: 'user_integrations', operation: 'upsert' });
+
+      await enableHealthKitBackgroundSync();
+
+      const syncOk = await runIncrementalHealthSync('manual');
+      if (syncOk) {
+        try { await computeAndStoreState(); } catch {}
+      }
+
+      setConnectionActive(true);
+      setWearableConnection({
+        provider: 'apple_health',
+        status: 'active',
+        lastSyncAt: syncOk ? new Date().toISOString() : null,
+        scopes,
+      });
+
+      console.info('[useVYRStore] Auto-connected to Apple Health');
+    } catch (e) {
+      console.warn('[useVYRStore] Auto-connect failed (silent):', e);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
@@ -169,10 +215,13 @@ export function useVYRStore() {
             );
           }
         });
+      } else if (connStatus === 'disconnected') {
+        // Was explicitly disconnected — try to auto-reconnect silently
+        autoConnect(userId);
       }
-    } else if (isConnectionActive()) {
-      // DB says no integration but localStorage flag is on — clean up
-      setConnectionActive(false);
+    } else {
+      // No integration exists at all — first time user, auto-connect
+      autoConnect(userId);
     }
 
     // Name
