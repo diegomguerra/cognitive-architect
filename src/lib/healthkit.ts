@@ -34,6 +34,67 @@ const ANCHOR_PREFIX = 'healthkit.anchor.';
 const SYNC_DEBOUNCE_MS = 1500;
 let syncLock = false;
 let syncDebounce: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Downsample samples to max 1 per minute.
+ * Groups by minute-floor of startDate, keeps the first sample in each bucket.
+ */
+function downsampleToOnePerMinute<T extends { startDate: string }>(samples: T[]): T[] {
+  const buckets = new Map<number, T>();
+  for (const s of samples) {
+    const minuteKey = Math.floor(new Date(s.startDate).getTime() / 60000);
+    if (!buckets.has(minuteKey)) buckets.set(minuteKey, s);
+  }
+  return Array.from(buckets.values());
+}
+
+/**
+ * Build rows for biomarker_samples table from raw provider data.
+ */
+function buildSampleRows(
+  userId: string,
+  hrSamples: HealthSample[],
+  rhrSamples: Array<Record<string, unknown>>,
+  hrvSamples: Array<Record<string, unknown>>,
+  spo2Samples: Array<Record<string, unknown>>,
+  stepsSamples: HealthSample[],
+  sleepSamples: HealthSample[],
+): Array<{
+  user_id: string; type: string; ts: string; end_ts: string | null;
+  value: number | null; payload_json: Record<string, unknown> | null; source: string;
+}> {
+  const rows: ReturnType<typeof buildSampleRows> = [];
+  const src = 'apple_health';
+
+  // HR — downsampled to 1/min
+  for (const s of downsampleToOnePerMinute(hrSamples)) {
+    rows.push({ user_id: userId, type: 'hr', ts: s.startDate, end_ts: null, value: s.value, payload_json: null, source: src });
+  }
+  // RHR
+  for (const s of rhrSamples) {
+    rows.push({ user_id: userId, type: 'rhr', ts: String(s.startDate), end_ts: null, value: Number(s.value), payload_json: null, source: src });
+  }
+  // HRV
+  for (const s of hrvSamples) {
+    rows.push({ user_id: userId, type: 'hrv', ts: String(s.startDate), end_ts: null, value: Number(s.value), payload_json: null, source: src });
+  }
+  // SpO2
+  for (const s of spo2Samples) {
+    rows.push({ user_id: userId, type: 'spo2', ts: String(s.startDate), end_ts: null, value: Number(s.value), payload_json: null, source: src });
+  }
+  // Steps (have start + end)
+  for (const s of stepsSamples) {
+    rows.push({ user_id: userId, type: 'steps', ts: s.startDate, end_ts: s.endDate, value: s.value, payload_json: null, source: src });
+  }
+  // Sleep (each stage with metadata)
+  for (const s of sleepSamples) {
+    rows.push({
+      user_id: userId, type: 'sleep', ts: s.startDate, end_ts: s.endDate,
+      value: null, payload_json: s.sleepState ? { sleepState: s.sleepState } : null, source: src,
+    });
+  }
+  return rows;
+}
+
 let observerListenerBound = false;
 
 export type HealthAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sharingAuthorized' | 'unknown';
@@ -468,6 +529,27 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hrv: hrvBridge.samples.length,
     spo2: spo2Bridge.samples.length,
   });
+
+  // ── Persist raw biomarker samples (never overwritten, deduped by constraint) ──
+  const rawRows = buildSampleRows(
+    userId,
+    hrData.samples, rhrBridge.samples, hrvBridge.samples, spo2Bridge.samples,
+    stepsData.samples, sleepData.samples,
+  );
+  if (rawRows.length > 0) {
+    try {
+      const { error: rawErr } = await supabase
+        .from('biomarker_samples')
+        .insert(rawRows as any)
+        .select('id');
+      if (rawErr && (rawErr as any).code !== '23505') {
+        console.warn('[healthkit] biomarker_samples insert error:', rawErr.message);
+      }
+      console.info('[healthkit] raw samples persisted:', rawRows.length, 'rows (deduped silently)');
+    } catch (e) {
+      console.warn('[healthkit] biomarker_samples insert failed:', e);
+    }
+  }
 
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
   const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
