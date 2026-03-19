@@ -510,16 +510,30 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const empty = { samples: [] as HealthSample[] };
   const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
-  // @capgo/capacitor-health: only steps & sleep
-  // VYRHealthBridge.readAnchored: rhr, hrv, spo2
+  // Read ALL types with time window (24h) — do NOT use stored anchors here,
+  // as runIncrementalHealthSync may have already consumed them.
+  // readAnchored without anchor reads all available data; we pass no anchor
+  // to get a full read, then the time window is handled by the predicate
+  // in the @capgo plugin. For bridge types, we read without anchor to get
+  // everything, then filter by time window in JS.
   const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
+    // Bridge: read WITHOUT anchor to get all data, not just delta
     VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
   ]);
+
+  // Filter bridge samples to last 24h (readAnchored has no time predicate)
+  const cutoff = yesterday.toISOString();
+  const filterByTime = (samples: Array<Record<string, unknown>>) =>
+    samples.filter(s => String(s.startDate || '') >= cutoff);
+
+  rhrBridge.samples = filterByTime(rhrBridge.samples);
+  hrvBridge.samples = filterByTime(hrvBridge.samples);
+  spo2Bridge.samples = filterByTime(spo2Bridge.samples);
 
   console.info('[healthkit] sync samples count', {
     sleep: sleepData.samples.length,
