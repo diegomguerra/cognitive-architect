@@ -73,18 +73,36 @@ export function useVYRStore() {
   const today = new Date().toISOString().split('T')[0];
 
   /**
-   * Reload only the VYR State from computed_states (lightweight).
-   * Used after background sync/auto-connect completes to update the UI
-   * without re-running the full loadData cycle.
+   * Reload VYR State from computed_states. If none exists for today,
+   * attempts to compute from ring_daily_data (fixes iOS race condition
+   * where bootstrapHealthSync is throttled but ring data already exists).
    */
   const refreshStateFromDB = useCallback(async () => {
     if (!userId) return;
-    const { data } = await supabase
+    let { data } = await supabase
       .from('computed_states')
       .select('day, score, level, pillars, phase')
       .eq('user_id', userId)
       .eq('day', today)
       .maybeSingle();
+
+    // No computed state yet — try to compute from ring_daily_data
+    if (!data) {
+      try {
+        const computed = await computeAndStoreState(today);
+        if (computed) {
+          data = {
+            day: today,
+            score: computed.score,
+            level: computed.level,
+            pillars: computed.pillars as any,
+            phase: computed.phase,
+          };
+        }
+      } catch (e) {
+        console.warn('[useVYRStore] refreshStateFromDB compute failed:', e);
+      }
+    }
 
     if (data) {
       const p = data.pillars as any;
