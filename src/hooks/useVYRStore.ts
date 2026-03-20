@@ -73,6 +73,38 @@ export function useVYRStore() {
   const today = new Date().toISOString().split('T')[0];
 
   /**
+   * Reload only the VYR State from computed_states (lightweight).
+   * Used after background sync/auto-connect completes to update the UI
+   * without re-running the full loadData cycle.
+   */
+  const refreshStateFromDB = useCallback(async () => {
+    if (!userId) return;
+    const { data } = await supabase
+      .from('computed_states')
+      .select('day, score, level, pillars, phase')
+      .eq('user_id', userId)
+      .eq('day', today)
+      .maybeSingle();
+
+    if (data) {
+      const p = data.pillars as any;
+      const pillars: PillarScore = {
+        energia: p?.energia ?? 0,
+        clareza: p?.clareza ?? 0,
+        estabilidade: p?.estabilidade ?? 0,
+      };
+      setState({
+        score: data.score ?? 0,
+        level: data.level ?? 'Crítico',
+        pillars,
+        limitingFactor: getLimitingFactor(pillars),
+        phase: (data.phase as VYRState['phase']) || getCurrentPhase(),
+      });
+      setHasData(true);
+    }
+  }, [userId, today]);
+
+  /**
    * Auto-connect to Apple Health without user interaction.
    * Requests HealthKit permissions, saves integration, enables background sync,
    * and triggers first sync. Runs silently — no error toasts.
@@ -110,10 +142,13 @@ export function useVYRStore() {
       });
 
       console.info('[useVYRStore] Auto-connected to Apple Health');
+
+      // Reload VYR state now that sync + compute have run
+      await refreshStateFromDB();
     } catch (e) {
       console.warn('[useVYRStore] Auto-connect failed (silent):', e);
     }
-  }, []);
+  }, [refreshStateFromDB]);
 
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -205,11 +240,13 @@ export function useVYRStore() {
       if (isActive) {
         setConnectionActive(true);
         // Fire-and-forget: bootstrap in background, don't block loadData
-        bootstrapHealthSync().then((synced) => {
+        bootstrapHealthSync().then(async (synced) => {
           if (synced) {
             setWearableConnection((prev) =>
               prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev
             );
+            // Reload VYR state — sync may have computed a fresh score
+            await refreshStateFromDB();
           }
         });
       } else if (connStatus === 'disconnected') {
@@ -227,7 +264,7 @@ export function useVYRStore() {
     }
 
     setLoading(false);
-  }, [userId, today]);
+  }, [userId, today, autoConnect, refreshStateFromDB]);
 
   useEffect(() => {
     loadData();
