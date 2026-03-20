@@ -7,6 +7,7 @@
  */
 
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync } from './healthkit';
+import { computeAndStoreState } from './vyr-recompute';
 
 const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes between auto-syncs
 const LAST_AUTO_SYNC_KEY = 'vyr.health.lastAutoSync';
@@ -43,7 +44,11 @@ export async function bootstrapHealthSync(): Promise<boolean> {
 
   try {
     const available = await isHealthKitAvailable();
-    if (!available) return false;
+    if (!available) {
+      // Even on web / unavailable, try to compute state from existing ring data
+      try { await computeAndStoreState(); } catch {}
+      return false;
+    }
 
     // Re-register background delivery and observer queries
     await enableHealthKitBackgroundSync();
@@ -58,7 +63,9 @@ export async function bootstrapHealthSync(): Promise<boolean> {
       return ok;
     }
 
-    console.info('[health-lifecycle] Skipping auto-sync (throttled)');
+    // Throttled — but still ensure today's state is computed from existing data
+    console.info('[health-lifecycle] Skipping auto-sync (throttled), ensuring state computed');
+    try { await computeAndStoreState(); } catch {}
     return true;
   } catch (err) {
     console.error('[health-lifecycle] Bootstrap failed:', err);
