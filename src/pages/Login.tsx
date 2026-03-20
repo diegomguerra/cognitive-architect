@@ -71,7 +71,7 @@ const Login = () => {
             className="text-[10px] uppercase tracking-[0.3em] font-mono"
             style={{ color: '#6b7b8d' }}
           >
-            v1.0
+            v6.4 (1)
           </span>
         </div>
       </div>
