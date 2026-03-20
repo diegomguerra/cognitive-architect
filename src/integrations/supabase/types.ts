@@ -46,11 +46,11 @@ export type Database = {
       }
       biomarker_samples: {
         Row: {
-          device_id: string
+          device_id: string | null
           end_ts: string | null
           id: string
           payload_json: Json | null
-          raw_hash: string
+          raw_hash: string | null
           source: string | null
           ts: string
           type: string
@@ -58,11 +58,11 @@ export type Database = {
           value: number | null
         }
         Insert: {
-          device_id: string
+          device_id?: string | null
           end_ts?: string | null
           id?: string
           payload_json?: Json | null
-          raw_hash: string
+          raw_hash?: string | null
           source?: string | null
           ts: string
           type: string
@@ -70,11 +70,11 @@ export type Database = {
           value?: number | null
         }
         Update: {
-          device_id?: string
+          device_id?: string | null
           end_ts?: string | null
           id?: string
           payload_json?: Json | null
-          raw_hash?: string
+          raw_hash?: string | null
           source?: string | null
           ts?: string
           type?: string
@@ -437,7 +437,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "participantes_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       referencias_populacionais: {
         Row: {
@@ -603,7 +611,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ring_daily_data_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       user_baselines: {
         Row: {
@@ -675,7 +691,15 @@ export type Database = {
           scope?: Json
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_consents_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       user_integrations: {
         Row: {
@@ -726,7 +750,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_integrations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
@@ -789,11 +821,27 @@ export type Database = {
           status?: string
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "webhook_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
     }
     Views: {
-      [_ in never]: never
+      admin_users: {
+        Row: {
+          email: string | null
+          nome: string | null
+          registered_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {
@@ -803,6 +851,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_admin: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "participant" | "researcher"
