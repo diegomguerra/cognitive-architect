@@ -72,8 +72,8 @@ async function upsertComputedState(userId: string, day: string, state: VYRState,
  *
  * Merges with existing subjective perceptions from daily_reviews if available.
  */
-export async function computeAndStoreState(day?: string): Promise<VYRState | null> {
-  const userId = await requireValidUserId();
+export async function computeAndStoreState(day?: string, knownUserId?: string): Promise<VYRState | null> {
+  const userId = knownUserId ?? await requireValidUserId();
   const targetDay = day ?? new Date().toISOString().split('T')[0];
 
   // 1. Read biometric data from ring_daily_data
