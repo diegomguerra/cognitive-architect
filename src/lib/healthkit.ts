@@ -631,7 +631,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
 
   // Auto-compute VYR State after every sync (ensures score stays current)
   try {
-    await computeAndStoreState(today);
+    await computeAndStoreState(today, userId);
   } catch (e) {
     console.warn('[healthkit] post-sync computeAndStoreState failed:', e);
   }

@@ -57,8 +57,8 @@ export function zScore(value: number, mean: number, std: number): number {
  * Calculate 30-day sliding window baseline from ring_daily_data.
  * Falls back to population references if < 3 days of data.
  */
-export async function calculateBaseline(): Promise<BaselineMetrics> {
-  const userId = await requireValidUserId();
+export async function calculateBaseline(knownUserId?: string): Promise<BaselineMetrics> {
+  const userId = knownUserId ?? await requireValidUserId();
 
   const thirtyDaysAgo = new Date();
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);

@@ -45,6 +45,17 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.vyrlabs.app</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.vyrlabs.app</string>
+		</dict>
+	</array>
 	<key>NSHealthShareUsageDescription</key>
 	<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, and resting heart rate to compute your daily cognitive insights.</string>
 	<key>NSHealthUpdateUsageDescription</key>

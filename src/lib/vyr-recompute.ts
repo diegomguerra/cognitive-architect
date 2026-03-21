@@ -39,8 +39,8 @@ function metricsToBiometric(m: RingMetrics): BiometricData {
   };
 }
 
-async function getBaseline(): Promise<BaselineValues> {
-  const raw = await calculateBaseline();
+async function getBaseline(knownUserId?: string): Promise<BaselineValues> {
+  const raw = await calculateBaseline(knownUserId);
   return {
     rhr: raw.rhr ?? undefined,
     hrv: raw.hrv ?? undefined,
@@ -109,7 +109,7 @@ export async function computeAndStoreState(day?: string, knownUserId?: string): 
   };
 
   // 3. Calculate baseline + compute state
-  const baseline = await getBaseline();
+  const baseline = await getBaseline(userId);
   const state = computeState(enriched, baseline);
 
   // 4. Persist
@@ -130,8 +130,8 @@ export interface PhaseValues {
  * When all 3 phases (BOOT, HOLD, CLEAR) are recorded, compute the arithmetic
  * mean of the 4 perception params, upsert to daily_reviews, then recompute state.
  */
-export async function computeDayMeanFromPhases(allValues: Record<string, PhaseValues>) {
-  const userId = await requireValidUserId();
+export async function computeDayMeanFromPhases(allValues: Record<string, PhaseValues>, knownUserId?: string) {
+  const userId = knownUserId ?? await requireValidUserId();
   const today = new Date().toISOString().split('T')[0];
 
   const phaseKeys = Object.keys(allValues);
@@ -210,7 +210,7 @@ export async function recomputeStateWithPerceptions(perceptions: SubjectivePerce
   };
 
   // 3. Calculate baseline + compute state
-  const baseline = await getBaseline();
+  const baseline = await getBaseline(userId);
   const state = computeState(enriched, baseline);
 
   // 4. Persist

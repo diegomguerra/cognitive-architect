@@ -17,40 +17,35 @@ import { join } from 'path';
 const IOS_DIR = join(process.cwd(), 'ios', 'App', 'App');
 const PBXPROJ = join(process.cwd(), 'ios', 'App', 'App.xcodeproj', 'project.pbxproj');
 
-// ── 1. Patch Info.plist (merge, don't overwrite) ───────────────────
+// -- 1. Patch Info.plist (merge, don't overwrite) --
 function patchInfoPlist() {
   const plistPath = join(IOS_DIR, 'Info.plist');
   if (!existsSync(plistPath)) {
-    console.error('❌ Info.plist not found at', plistPath);
+    console.error('Info.plist not found at', plistPath);
     process.exit(1);
   }
 
   let plist = readFileSync(plistPath, 'utf8');
   let changed = false;
 
-  const healthDescriptions = `
-	<key>NSHealthShareUsageDescription</key>
-	<string>VYR Labs reads your heart rate, resting heart rate, heart rate variability (HRV), sleep analysis, step count, and blood oxygen saturation (SpO2) to calculate your daily cognitive performance score and provide personalized insights.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>VYR Labs writes summary records for steps, body temperature, sleep, heart rate, HRV, blood pressure, VO2Max, SpO2, and active energy burned to Apple Health when permitted.</string>`;
-
   if (!plist.includes('NSHealthShareUsageDescription')) {
-    plist = plist.replace(/<\/dict>\s*<\/plist>/, `${healthDescriptions}\n</dict>\n</plist>`);
-    writeFileSync(plistPath, plist);
-    console.log('✅ Info.plist patched with HealthKit usage descriptions');
-  } else {
-    console.log('ℹ️  NSHealthShareUsageDescription already present');
-  }
-
-  // NSHealthUpdateUsageDescription
-  if (!plist.includes('NSHealthUpdateUsageDescription')) {
-    const desc = `\t<key>NSHealthUpdateUsageDescription</key>
-\t<string>VYR Labs writes steps, heart rate, HRV, sleep, SpO2, body temperature, blood pressure, VO2 max, and active energy back to Apple Health so you can view cognitive wellness trends alongside your health data. No raw data is modified. Disable anytime in Settings › Privacy › Health.</string>`;
+    const desc = `\t<key>NSHealthShareUsageDescription</key>
+\t<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, and resting heart rate to compute your daily cognitive insights.</string>`;
     plist = plist.replace(/<\/dict>\s*<\/plist>/, `${desc}\n</dict>\n</plist>`);
     changed = true;
-    console.log('✅ Added NSHealthUpdateUsageDescription');
+    console.log('[patch-ios] Added NSHealthShareUsageDescription');
   } else {
-    console.log('ℹ️  NSHealthUpdateUsageDescription already present');
+    console.log('[patch-ios] NSHealthShareUsageDescription already present');
+  }
+
+  if (!plist.includes('NSHealthUpdateUsageDescription')) {
+    const desc = `\t<key>NSHealthUpdateUsageDescription</key>
+\t<string>VYR Labs writes samples for steps, body temperature, sleep, heart rate, HRV (SDNN), blood pressure (systolic + diastolic), VO2 Max, SpO2, and active energy burned to Apple Health when you grant permission. Stress is never written to Apple Health.</string>`;
+    plist = plist.replace(/<\/dict>\s*<\/plist>/, `${desc}\n</dict>\n</plist>`);
+    changed = true;
+    console.log('[patch-ios] Added NSHealthUpdateUsageDescription');
+  } else {
+    console.log('[patch-ios] NSHealthUpdateUsageDescription already present');
   }
 
   if (changed) writeFileSync(plistPath, plist);
@@ -61,11 +56,10 @@ function ensureEntitlementKey(xml, key, valueXml) {
     const pattern = new RegExp(`<key>${key}<\\/key>\\s*(<true\\/>|<false\\/>|<array>[\\s\\S]*?<\\/array>)`, 'm');
     return xml.replace(pattern, `<key>${key}</key>\n\t${valueXml}`);
   }
-
   return xml.replace('</dict>', `\t<key>${key}</key>\n\t${valueXml}\n</dict>`);
 }
 
-// 2. Create/patch App.entitlements
+// -- 2. Create/patch App.entitlements --
 function patchEntitlements() {
   const entPath = join(IOS_DIR, 'App.entitlements');
   const defaultXml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -74,41 +68,28 @@ function patchEntitlements() {
 <dict>
 </dict>
 </plist>`;
-  } else {
-    // Merge missing keys before </dict>
-    let insertions = '';
-    if (needsHealthkit) {
-      insertions += '\t<key>com.apple.developer.healthkit</key>\n\t<true/>\n';
-    }
-    if (needsBgDelivery) {
-      insertions += '\t<key>com.apple.developer.healthkit.background-delivery</key>\n\t<true/>\n';
-    }
-    if (insertions) {
-      existing = existing.replace(/<\/dict>/, `${insertions}</dict>`);
-    }
-  }
 
   let xml = existsSync(entPath) ? readFileSync(entPath, 'utf8') : defaultXml;
 
   xml = ensureEntitlementKey(xml, 'com.apple.developer.healthkit', '<true/>');
   xml = ensureEntitlementKey(xml, 'com.apple.developer.healthkit.background-delivery', '<true/>');
 
+  // Remove health-records if accidentally present (we don't use clinical data)
   xml = xml.replace(/\s*<key>com\.apple\.developer\.healthkit\.access<\/key>\s*<array>[\s\S]*?<\/array>/g, '');
   xml = xml.replace(/\s*<string>health-records<\/string>\s*/g, '');
 
   writeFileSync(entPath, xml);
-  console.log('✅ App.entitlements merged (idempotent), no health-records added');
+  console.log('[patch-ios] App.entitlements merged (idempotent)');
 }
 
-// ── 3. Patch project.pbxproj ───────────────────────────────────────
+// -- 3. Patch project.pbxproj --
 function patchPbxproj() {
   if (!existsSync(PBXPROJ)) {
-    console.error('❌ project.pbxproj not found at', PBXPROJ);
+    console.error('[patch-ios] project.pbxproj not found at', PBXPROJ);
     return;
   }
 
   let pbx = readFileSync(PBXPROJ, 'utf8');
-  let changed = false;
 
   if (!pbx.includes('com.apple.HealthKit')) {
     if (pbx.includes('SystemCapabilities = {')) {
@@ -117,24 +98,25 @@ function patchPbxproj() {
         `SystemCapabilities = {\n\t\t\t\tcom.apple.HealthKit = {\n\t\t\t\t\tenabled = 1;\n\t\t\t\t};`,
       );
       writeFileSync(PBXPROJ, pbx);
-      console.log('✅ project.pbxproj patched with HealthKit capability');
+      console.log('[patch-ios] project.pbxproj patched with HealthKit capability');
     }
   } else {
-    console.log('ℹ️  project.pbxproj already has HealthKit capability');
+    console.log('[patch-ios] project.pbxproj already has HealthKit capability');
   }
 
+  // Re-read in case it was written above
+  pbx = readFileSync(PBXPROJ, 'utf8');
   if (!pbx.includes('CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"')) {
-    pbx = readFileSync(PBXPROJ, 'utf8');
     pbx = pbx.replace(/CODE_SIGN_ENTITLEMENTS = ""/g, 'CODE_SIGN_ENTITLEMENTS = "App/App.entitlements"');
     writeFileSync(PBXPROJ, pbx);
-    console.log('✅ project.pbxproj patched');
+    console.log('[patch-ios] project.pbxproj entitlements path set');
   } else {
-    console.log('ℹ️  project.pbxproj already correct');
+    console.log('[patch-ios] project.pbxproj entitlements already correct');
   }
 }
 
-console.log('🔧 Patching iOS project for HealthKit...\n');
+console.log('[patch-ios] Patching iOS project for HealthKit...\n');
 patchInfoPlist();
 patchEntitlements();
 patchPbxproj();
-console.log('\n🎉 iOS patch complete!');
+console.log('\n[patch-ios] iOS patch complete!');

@@ -3,6 +3,18 @@ import { supabase } from '@/integrations/supabase/client';
 import type { Session, User } from '@supabase/supabase-js';
 import { setConnectionActive } from '@/lib/health-lifecycle';
 
+/**
+ * On Capacitor iOS, window.location.origin returns "capacitor://localhost"
+ * which is not a valid OAuth redirect. Use the Supabase project URL as fallback.
+ */
+function getRedirectUrl(): string {
+  const origin = window.location.origin;
+  if (origin.startsWith('capacitor://') || origin.startsWith('ionic://') || origin === 'null') {
+    return 'com.vyrlabs.app://login-callback';
+  }
+  return origin;
+}
+
 interface AuthContextType {
   session: Session | null;
   user: User | null;
@@ -45,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: getRedirectUrl() },
     });
     return { error: error?.message || null };
   };
@@ -58,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithOAuth = async (provider: 'google' | 'apple') => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: getRedirectUrl() },
     });
     return { error: error?.message || null };
   };
