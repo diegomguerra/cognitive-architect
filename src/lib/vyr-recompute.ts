@@ -72,8 +72,8 @@ async function upsertComputedState(userId: string, day: string, state: VYRState,
  *
  * Merges with existing subjective perceptions from daily_reviews if available.
  */
-export async function computeAndStoreState(day?: string): Promise<VYRState | null> {
-  const userId = await requireValidUserId();
+export async function computeAndStoreState(day?: string, knownUserId?: string): Promise<VYRState | null> {
+  const userId = knownUserId ?? await requireValidUserId();
   const targetDay = day ?? new Date().toISOString().split('T')[0];
 
   // 1. Read biometric data from ring_daily_data
@@ -173,8 +173,8 @@ export async function computeDayMeanFromPhases(allValues: Record<string, PhaseVa
  * Recompute VYR State merging existing biometric raw_input with subjective perceptions.
  * Called when the user submits perceptions in PerceptionsTab.
  */
-export async function recomputeStateWithPerceptions(perceptions: SubjectivePerceptions) {
-  const userId = await requireValidUserId();
+export async function recomputeStateWithPerceptions(perceptions: SubjectivePerceptions, knownUserId?: string) {
+  const userId = knownUserId ?? await requireValidUserId();
   const today = new Date().toISOString().split('T')[0];
 
   // 1. Try to get biometric data from ring_daily_data first, fallback to existing raw_input
