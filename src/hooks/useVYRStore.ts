@@ -206,7 +206,7 @@ export function useVYRStore() {
     // If no computed state for today, try to compute from ring_daily_data
     if (!todayEntry) {
       try {
-        const computed = await computeAndStoreState(today);
+        const computed = await computeAndStoreState(today, userId);
         if (computed) {
           todayEntry = {
             day: today,
