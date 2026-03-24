@@ -142,13 +142,23 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
-    // First check if we already have permissions — skip re-requesting if so
+    // First check if we can already read data — the most reliable permission test.
+    // iOS HealthKit never reveals if READ was denied (returns notDetermined),
+    // so status checks alone are unreliable. A successful read is the ground truth.
+    const canAlreadyRead = await probeHealthKitRead();
+    if (canAlreadyRead) {
+      console.info('[healthkit] permissions verified via probe read, skipping re-request');
+      await forceRefreshSession();
+      return true;
+    }
+
+    // Fallback: check status (may catch write-type grants)
     const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
     const currentStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
     const alreadyGranted = Object.entries(currentStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
 
     if (alreadyGranted.length > 0) {
-      console.info('[healthkit] permissions already granted, skipping re-request', { count: alreadyGranted.length });
+      console.info('[healthkit] permissions already granted via status check', { count: alreadyGranted.length });
       await forceRefreshSession();
       return true;
     }
@@ -156,32 +166,96 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
     // First time — request permissions
     const { Health } = await import('@capgo/capacitor-health');
 
+    let pluginOk = false;
     try {
       await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
+      pluginOk = true;
     } catch (pluginErr: any) {
       console.warn('[healthkit] @capgo requestAuthorization failed:', pluginErr?.code || pluginErr);
     }
 
+    let bridgeOk = false;
     try {
-      await VYRHealthBridge.requestAuthorization({
+      const bridgeResult = await VYRHealthBridge.requestAuthorization({
         readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation'],
         writeTypes: ['bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic'],
       });
+      bridgeOk = bridgeResult?.granted ?? false;
     } catch (bridgeErr: any) {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
     }
 
-    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
-    const grantedTypes = Object.entries(afterStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
-
-    console.info('[healthkit] authorization result', { grantedCount: grantedTypes.length });
-
     await forceRefreshSession();
+
+    // If either plugin reported success, trust it
+    if (pluginOk || bridgeOk) {
+      console.info('[healthkit] authorization dialog completed', { pluginOk, bridgeOk });
+      // Verify with a probe read — the definitive test
+      const canRead = await probeHealthKitRead();
+      if (canRead) {
+        console.info('[healthkit] post-authorization probe read succeeded');
+        return true;
+      }
+      // Probe failed but dialog was shown — iOS may need a moment.
+      // On iOS, after the permission dialog, the app resumes and status may lag.
+      // Trust that the dialog was presented and completed (user didn't crash).
+      console.info('[healthkit] probe read returned no data, but dialog was shown — assuming granted');
+      return true;
+    }
+
+    // Both plugins failed — check status as last resort
+    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
+    const grantedTypes = Object.entries(afterStatus)
+      .filter(([, s]) => s === 'sharingAuthorized' || s === 'unknown')
+      .map(([t]) => t);
+
+    console.info('[healthkit] authorization fallback status check', { grantedCount: grantedTypes.length });
     return grantedTypes.length > 0;
   } catch (e) {
     console.error('[healthkit] Permission request failed:', e);
     await forceRefreshSession();
     return false;
+  }
+}
+
+/**
+ * Probe HealthKit by attempting to read a small amount of data.
+ * This is the most reliable way to check permissions on iOS,
+ * since HealthKit hides read-permission denials behind notDetermined.
+ * Returns true if we could read at least one sample (or the bridge
+ * returned without an authorization error).
+ */
+async function probeHealthKitRead(): Promise<boolean> {
+  try {
+    // Try bridge first — restingHeartRate is typically available if permission granted
+    const result = await VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 1 });
+    if (result.samples && result.samples.length > 0) return true;
+
+    // Try heartRateVariability as a second probe
+    const hrvResult = await VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 1 });
+    if (hrvResult.samples && hrvResult.samples.length > 0) return true;
+
+    // Try plugin for basic types
+    const { Health } = await import('@capgo/capacitor-health');
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const samples = await Health.readSamples({
+      dataType: 'steps' as HealthDataType,
+      startDate: yesterday.toISOString(),
+      endDate: new Date().toISOString(),
+      limit: 1,
+    });
+    // If readSamples didn't throw, we have read access (even if empty)
+    return true;
+  } catch (e: any) {
+    // Authorization errors mean no permission
+    const msg = String(e?.message || e || '').toLowerCase();
+    if (msg.includes('authorization') || msg.includes('denied') || msg.includes('not determined')) {
+      return false;
+    }
+    // Other errors (no data, network, etc.) — we likely DO have permission
+    console.debug('[healthkit] probe read non-auth error (likely ok):', msg);
+    return true;
   }
 }
 

@@ -268,8 +268,9 @@ export function useVYRStore() {
           }
         });
       } else if (connStatus === 'disconnected') {
-        // Was explicitly disconnected — try to auto-reconnect silently
-        autoConnect(userId);
+        // Was explicitly disconnected by user — do NOT auto-reconnect.
+        // User must tap "Connect" again manually to avoid reconnect loops.
+        console.info('[useVYRStore] Integration is disconnected, waiting for manual reconnect');
       }
     } else {
       // No integration exists at all — first time user, auto-connect
