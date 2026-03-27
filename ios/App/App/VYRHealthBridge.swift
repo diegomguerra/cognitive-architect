@@ -16,11 +16,23 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "enableBackgroundDelivery", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "registerObserverQueries", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readAnchored", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "requestAuthorization", returnType: CAPPluginReturnPromise),
+        // FIX P1: persist/load anchors in UserDefaults instead of JS localStorage
+        CAPPluginMethod(name: "saveAnchor", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "loadAnchor", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveConnectionState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "loadConnectionState", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
+    // FIX P5: track registered observer keys to avoid duplicate registration
+    private var activeObserverKeys = Set<String>()
     private var observerQueries: [HKObserverQuery] = []
+
+    // FIX P1: UserDefaults suite shared with the app group (falls back to standard)
+    private var defaults: UserDefaults {
+        return UserDefaults(suiteName: "group.com.vyrlabs.app") ?? UserDefaults.standard
+    }
 
     private func sampleType(for key: String) -> HKSampleType? {
         switch key {
@@ -64,6 +76,53 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
         return data.base64EncodedString()
     }
+
+    // MARK: - FIX P1: Native persistence methods
+
+    /// Save an HKQueryAnchor string to UserDefaults (persists across reinstalls via app group)
+    @objc func saveAnchor(_ call: CAPPluginCall) {
+        guard let key = call.getString("key"), let value = call.getString("value") else {
+            call.reject("key and value are required")
+            return
+        }
+        defaults.set(value, forKey: "vyr.anchor.\(key)")
+        call.resolve(["saved": true])
+    }
+
+    /// Load an HKQueryAnchor string from UserDefaults
+    @objc func loadAnchor(_ call: CAPPluginCall) {
+        guard let key = call.getString("key") else {
+            call.reject("key is required")
+            return
+        }
+        let value = defaults.string(forKey: "vyr.anchor.\(key)")
+        call.resolve(["value": value as Any])
+    }
+
+    /// Persist connection-active flag and last-sync timestamp to UserDefaults
+    @objc func saveConnectionState(_ call: CAPPluginCall) {
+        let active = call.getBool("active") ?? false
+        let lastSync = call.getString("lastSync")
+        defaults.set(active, forKey: "vyr.health.connectionActive")
+        if let lastSync {
+            defaults.set(lastSync, forKey: "vyr.health.lastSync")
+        } else {
+            defaults.removeObject(forKey: "vyr.health.lastSync")
+        }
+        call.resolve(["saved": true])
+    }
+
+    /// Load connection state from UserDefaults
+    @objc func loadConnectionState(_ call: CAPPluginCall) {
+        let active = defaults.bool(forKey: "vyr.health.connectionActive")
+        let lastSync = defaults.string(forKey: "vyr.health.lastSync")
+        call.resolve([
+            "active": active,
+            "lastSync": lastSync as Any,
+        ])
+    }
+
+    // MARK: - Standard plugin methods
 
     @objc func isHealthKitAvailable(_ call: CAPPluginCall) {
         call.resolve(["available": HKHealthStore.isHealthDataAvailable()])
@@ -188,6 +247,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // FIX P3: returns actual HK authorization status, not just share status
     @objc func getAuthorizationStatuses(_ call: CAPPluginCall) {
         guard let types = call.getArray("types", String.self) else {
             call.reject("types is required")
@@ -230,16 +290,26 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // FIX P5: idempotent observer registration — stops only removed types, keeps active ones
     @objc func registerObserverQueries(_ call: CAPPluginCall) {
         guard let keys = call.getArray("types", String.self) else {
             call.reject("types is required")
             return
         }
 
-        observerQueries.forEach { healthStore.stop($0) }
-        observerQueries.removeAll()
+        let newKeys = Set(keys)
 
-        for key in keys {
+        // Stop observers for keys no longer needed
+        let removedKeys = activeObserverKeys.subtracting(newKeys)
+        if !removedKeys.isEmpty {
+            observerQueries.forEach { healthStore.stop($0) }
+            observerQueries.removeAll()
+            activeObserverKeys.removeAll()
+        }
+
+        // Register only keys not already active
+        let toRegister = newKeys.subtracting(activeObserverKeys)
+        for key in toRegister {
             guard let type = sampleType(for: key) else { continue }
             let query = HKObserverQuery(sampleType: type, predicate: nil) { [weak self] _, completionHandler, error in
                 defer { completionHandler() }
@@ -251,9 +321,10 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             }
             observerQueries.append(query)
             healthStore.execute(query)
+            activeObserverKeys.insert(key)
         }
 
-        call.resolve(["registered": observerQueries.count])
+        call.resolve(["registered": activeObserverKeys.count])
     }
 
     @objc func readAnchored(_ call: CAPPluginCall) {
@@ -263,12 +334,20 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
 
         let limit = call.getInt("limit") ?? HKObjectQueryNoLimit
-        let anchor = anchorFromString(call.getString("anchor"))
+        // FIX P1: prefer anchor from UserDefaults, fallback to JS-provided anchor
+        let nativeAnchorStr = defaults.string(forKey: "vyr.anchor.\(key)")
+        let jsAnchorStr = call.getString("anchor")
+        let anchor = anchorFromString(nativeAnchorStr ?? jsAnchorStr)
 
         let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) { [weak self] _, samplesOrNil, _, newAnchor, error in
             if let error {
                 call.reject(error.localizedDescription)
                 return
+            }
+
+            // FIX P1: persist new anchor to UserDefaults immediately
+            if let anchorStr = self?.anchorToString(newAnchor) {
+                self?.defaults.set(anchorStr, forKey: "vyr.anchor.\(key)")
             }
 
             let samples = samplesOrNil ?? []

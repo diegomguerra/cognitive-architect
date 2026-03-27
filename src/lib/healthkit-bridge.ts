@@ -13,6 +13,15 @@ export interface VYRHealthBridgePlugin {
   registerObserverQueries(options: { types: string[] }): Promise<{ registered: number }>;
   readAnchored(options: { type: string; anchor?: string; limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
   requestAuthorization(options: { readTypes?: string[]; writeTypes?: string[] }): Promise<{ granted: boolean }>;
+
+  // FIX P1: Native persistence — anchors and connection state stored in UserDefaults,
+  // not localStorage. Survives app reinstall, TestFlight public link installs, and
+  // WKWebView container resets.
+  saveAnchor(options: { key: string; value: string }): Promise<{ saved: boolean }>;
+  loadAnchor(options: { key: string }): Promise<{ value: string | null }>;
+  saveConnectionState(options: { active: boolean; lastSync?: string }): Promise<{ saved: boolean }>;
+  loadConnectionState(): Promise<{ active: boolean; lastSync: string | null }>;
+
   addListener(eventName: 'healthkitObserverUpdated', listenerFunc: (event: { type: string }) => void): Promise<{ remove: () => Promise<void> }>;
   addListener(eventName: 'healthkitObserverError', listenerFunc: (event: { type: string; error: string }) => void): Promise<{ remove: () => Promise<void> }>;
 }

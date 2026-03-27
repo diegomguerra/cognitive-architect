@@ -10,15 +10,25 @@ function tokenPreview(token: string | undefined | null): string {
 }
 
 /**
- * Force refresh the Supabase session unconditionally.
- * MUST be called after any native dialog (HealthKit, permissions, etc.)
+ * Sleep for a given number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * FIX P2: Force refresh the Supabase session.
+ * No longer calls signOut() on failure — that was destroying sessions for users
+ * on slow/transitional networks (e.g. just after a native HealthKit dialog).
+ * Throws on failure so callers can decide what to do.
  */
 export async function forceRefreshSession(): Promise<void> {
   const { data, error } = await supabase.auth.refreshSession();
   if (error) {
-    console.warn('[DB][AUTH] refresh failed, signing out:', error.message);
-    await supabase.auth.signOut();
-    throw new Error('Session expired. Please log in again.');
+    // Log the failure but DO NOT sign the user out.
+    // The caller decides whether to retry or surface an error.
+    console.warn('[DB][AUTH] refresh failed (NOT signing out):', error.message);
+    throw new Error(`Session refresh failed: ${error.message}`);
   }
   console.info('[DB][AUTH] session refreshed', {
     userId: data.session?.user?.id ?? 'NONE',
@@ -31,26 +41,31 @@ export async function forceRefreshSession(): Promise<void> {
 
 /**
  * Require a valid user ID AND access_token from the current session.
- * If session is stale, attempts one refresh before aborting.
- * userId comes EXCLUSIVELY from session.user.id — never external.
+ * FIX P2: If session is stale, attempts up to 3 refreshes with exponential backoff
+ * before giving up. Never signs the user out.
  */
 export async function requireValidUserId(): Promise<string> {
   let { data: { session } } = await supabase.auth.getSession();
 
-  // If no token, attempt one refresh
+  // If no token, attempt refresh with backoff (up to 3 attempts)
   if (!session?.access_token) {
-    console.warn('[DB][AUTH] no token on first attempt, refreshing…');
-    try {
-      await forceRefreshSession();
-      const refreshed = await supabase.auth.getSession();
-      session = refreshed.data.session;
-    } catch {
-      // forceRefreshSession already signs out
+    console.warn('[DB][AUTH] no token on first attempt, refreshing with backoff…');
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await forceRefreshSession();
+        const refreshed = await supabase.auth.getSession();
+        session = refreshed.data.session;
+        if (session?.access_token) break;
+      } catch {
+        if (attempt < 3) {
+          await sleep(attempt * 500); // 500ms, 1000ms, 1500ms
+        }
+      }
     }
   }
 
   if (!session?.user?.id || !session?.access_token) {
-    console.warn('[DB][AUTH] ABORT — no valid session', {
+    console.warn('[DB][AUTH] ABORT — no valid session after retries', {
       userId: session?.user?.id ?? 'NONE',
       hasToken: !!session?.access_token,
     });
@@ -99,6 +114,8 @@ export async function retryOnAuthErrorLabeled<T>(
       try {
         await forceRefreshSession();
       } catch {
+        // FIX P2: refresh failed but we don't sign out. Return the original error.
+        console.warn(`${tag} session refresh failed during retry — returning original error`);
         return result;
       }
       const retry = await fn();

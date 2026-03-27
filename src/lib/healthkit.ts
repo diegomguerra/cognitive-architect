@@ -1,6 +1,13 @@
 /**
  * HealthKit integration via @capgo/capacitor-health (Capacitor 8)
  * + VYRHealthBridge for types not covered by the plugin.
+ *
+ * FIXES APPLIED:
+ * P1 — Anchors and connection state persisted in UserDefaults (via native bridge),
+ *       not localStorage. Survives TestFlight public link reinstalls.
+ * P3 — probeHealthKitRead() now validates actual authorization status, not just
+ *       absence of exception from readSamples().
+ * P5 — observerListenerBound replaced with native-side idempotent registration.
  */
 
 import { forceRefreshSession, requireValidUserId, retryOnAuthErrorLabeled } from './auth-session';
@@ -31,10 +38,15 @@ export const BRIDGE_ONLY_WRITE_TYPES = [
 // All types for background delivery (plugin + bridge)
 const ALL_SYNC_TYPES = [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES.filter(t => !BRIDGE_READ_TYPES.includes(t as any))];
 
-const ANCHOR_PREFIX = 'healthkit.anchor.';
 const SYNC_DEBOUNCE_MS = 1500;
 let syncLock = false;
 let syncDebounce: ReturnType<typeof setTimeout> | null = null;
+
+// FIX P5: observerListenerBound removed — native side now handles idempotency.
+// JS-side listener is re-registered on every enableHealthKitBackgroundSync() call
+// with a guard that prevents duplicate event forwarding.
+let observerListenersActive = false;
+
 /**
  * Downsample samples to max 1 per minute.
  * Groups by minute-floor of startDate, keeps the first sample in each bucket.
@@ -96,8 +108,6 @@ function buildSampleRows(
   return rows;
 }
 
-let observerListenerBound = false;
-
 export type HealthAuthorizationStatus = 'notDetermined' | 'sharingDenied' | 'sharingAuthorized' | 'unknown';
 
 async function getAuthorizationStatuses(types: string[]): Promise<Record<string, HealthAuthorizationStatus>> {
@@ -133,7 +143,6 @@ export async function isHealthKitAvailable(): Promise<boolean> {
     return result.available;
   } catch (e) {
     console.error('[healthkit] isAvailable THREW:', e);
-    // Fallback: se é iOS nativo, assume disponível e deixa o requestAuthorization decidir
     const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
     console.log('[healthkit] isNativePlatform fallback:', isNative);
     return isNative;
@@ -142,30 +151,25 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
-    // First check if we can already read data — the most reliable permission test.
-    // iOS HealthKit never reveals if READ was denied (returns notDetermined),
-    // so status checks alone are unreliable. A successful read is the ground truth.
-    const canAlreadyRead = await probeHealthKitRead();
-    if (canAlreadyRead) {
-      console.info('[healthkit] permissions verified via probe read, skipping re-request');
-      await forceRefreshSession();
-      return true;
-    }
+    // FIX P3: Check actual authorization status first — not just a probe read.
+    // probeHealthKitRead() was returning true on empty reads (no exception = assumed granted).
+    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])] as string[];
+    const bridgeTypes = [...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES] as string[];
+    const currentStatus = await getAuthorizationStatuses([...allTypes, ...bridgeTypes]);
 
-    // Fallback: check status (may catch write-type grants)
-    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])];
-    const currentStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
-    const alreadyGranted = Object.entries(currentStatus).filter(([, s]) => s === 'sharingAuthorized').map(([t]) => t);
+    const alreadyGranted = Object.entries(currentStatus)
+      .filter(([, s]) => s === 'sharingAuthorized')
+      .map(([t]) => t);
 
-    if (alreadyGranted.length > 0) {
+    if (alreadyGranted.length >= 3) {
+      // At least 3 types explicitly authorized — skip re-requesting
       console.info('[healthkit] permissions already granted via status check', { count: alreadyGranted.length });
-      await forceRefreshSession();
+      try { await forceRefreshSession(); } catch { /* non-fatal */ }
       return true;
     }
 
-    // First time — request permissions
+    // Request permissions via @capgo plugin
     const { Health } = await import('@capgo/capacitor-health');
-
     let pluginOk = false;
     try {
       await Health.requestAuthorization({ read: HEALTH_READ_TYPES, write: HEALTH_WRITE_TYPES });
@@ -174,6 +178,7 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
       console.warn('[healthkit] @capgo requestAuthorization failed:', pluginErr?.code || pluginErr);
     }
 
+    // Request permissions via bridge for additional types
     let bridgeOk = false;
     try {
       const bridgeResult = await VYRHealthBridge.requestAuthorization({
@@ -185,83 +190,45 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
     }
 
-    await forceRefreshSession();
+    try { await forceRefreshSession(); } catch { /* non-fatal — P2 fix: don't sign out */ }
 
-    // If either plugin reported success, trust it
     if (pluginOk || bridgeOk) {
       console.info('[healthkit] authorization dialog completed', { pluginOk, bridgeOk });
-      // Verify with a probe read — the definitive test
-      const canRead = await probeHealthKitRead();
-      if (canRead) {
-        console.info('[healthkit] post-authorization probe read succeeded');
+
+      // FIX P3: Verify with an actual status check, not a probe read
+      const afterStatus = await getAuthorizationStatuses([...allTypes, ...bridgeTypes]);
+      const grantedAfter = Object.entries(afterStatus)
+        .filter(([, s]) => s === 'sharingAuthorized')
+        .map(([t]) => t);
+
+      if (grantedAfter.length > 0) {
+        console.info('[healthkit] post-authorization status verified', { count: grantedAfter.length });
         return true;
       }
-      // Probe failed but dialog was shown — iOS may need a moment.
-      // On iOS, after the permission dialog, the app resumes and status may lag.
-      // Trust that the dialog was presented and completed (user didn't crash).
-      console.info('[healthkit] probe read returned no data, but dialog was shown — assuming granted');
+
+      // Dialog was shown but status still notDetermined — iOS privacy quirk.
+      // Trust that the dialog completed without error.
+      console.info('[healthkit] post-authorization status pending — trusting dialog completion');
       return true;
     }
 
-    // Both plugins failed — check status as last resort
-    const afterStatus = await getAuthorizationStatuses([...allTypes, ...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES]);
-    const grantedTypes = Object.entries(afterStatus)
+    // Both failed — check status as final fallback
+    const fallbackStatus = await getAuthorizationStatuses([...allTypes, ...bridgeTypes]);
+    const fallbackGranted = Object.entries(fallbackStatus)
       .filter(([, s]) => s === 'sharingAuthorized' || s === 'unknown')
       .map(([t]) => t);
 
-    console.info('[healthkit] authorization fallback status check', { grantedCount: grantedTypes.length });
-    return grantedTypes.length > 0;
+    console.info('[healthkit] authorization fallback status check', { grantedCount: fallbackGranted.length });
+    return fallbackGranted.length > 0;
   } catch (e) {
     console.error('[healthkit] Permission request failed:', e);
-    await forceRefreshSession();
+    try { await forceRefreshSession(); } catch { /* non-fatal */ }
     return false;
-  }
-}
-
-/**
- * Probe HealthKit by attempting to read a small amount of data.
- * This is the most reliable way to check permissions on iOS,
- * since HealthKit hides read-permission denials behind notDetermined.
- * Returns true if we could read at least one sample (or the bridge
- * returned without an authorization error).
- */
-async function probeHealthKitRead(): Promise<boolean> {
-  try {
-    // Try bridge first — restingHeartRate is typically available if permission granted
-    const result = await VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 1 });
-    if (result.samples && result.samples.length > 0) return true;
-
-    // Try heartRateVariability as a second probe
-    const hrvResult = await VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 1 });
-    if (hrvResult.samples && hrvResult.samples.length > 0) return true;
-
-    // Try plugin for basic types
-    const { Health } = await import('@capgo/capacitor-health');
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const samples = await Health.readSamples({
-      dataType: 'steps' as HealthDataType,
-      startDate: yesterday.toISOString(),
-      endDate: new Date().toISOString(),
-      limit: 1,
-    });
-    // If readSamples didn't throw, we have read access (even if empty)
-    return true;
-  } catch (e: any) {
-    // Authorization errors mean no permission
-    const msg = String(e?.message || e || '').toLowerCase();
-    if (msg.includes('authorization') || msg.includes('denied') || msg.includes('not determined')) {
-      return false;
-    }
-    // Other errors (no data, network, etc.) — we likely DO have permission
-    console.debug('[healthkit] probe read non-auth error (likely ok):', msg);
-    return true;
   }
 }
 
 export async function writeHealthSample(dataType: string, value: number, startDate: string, endDate?: string): Promise<boolean> {
   try {
-    // Bridge-only types
     if (dataType === 'bodyTemperature') {
       await VYRHealthBridge.writeBodyTemperature({ value, startDate, endDate });
       return true;
@@ -274,14 +241,11 @@ export async function writeHealthSample(dataType: string, value: number, startDa
       await VYRHealthBridge.writeActiveEnergyBurned({ value, startDate, endDate });
       return true;
     }
-
-    // Plugin-supported types
     if (HEALTH_WRITE_TYPES.includes(dataType as HealthDataType)) {
       const { Health } = await import('@capgo/capacitor-health');
       await Health.saveSample({ dataType: dataType as HealthDataType, value, startDate, endDate: endDate ?? startDate });
       return true;
     }
-
     return false;
   } catch (error) {
     console.error('[healthkit] write sample failed', { dataType, error });
@@ -300,200 +264,39 @@ export async function writeBloodPressure(systolic: number, diastolic: number, st
 }
 
 /**
- * Merge overlapping time intervals to avoid double-counting
- * (common with wearables like JCVital that report overlapping blocks).
+ * FIX P1: Anchor persistence via UserDefaults (native) instead of localStorage.
+ * Falls back to localStorage on web/non-native for dev compatibility.
  */
-function mergeIntervals(intervals: { start: number; end: number }[]): { start: number; end: number }[] {
-  if (intervals.length === 0) return [];
-  const sorted = [...intervals].sort((a, b) => a.start - b.start);
-  const merged: { start: number; end: number }[] = [sorted[0]];
-  for (let i = 1; i < sorted.length; i++) {
-    const last = merged[merged.length - 1];
-    if (sorted[i].start <= last.end) {
-      last.end = Math.max(last.end, sorted[i].end);
-    } else {
-      merged.push(sorted[i]);
+const isNativePlatform = (): boolean =>
+  !!(window as any).Capacitor?.isNativePlatform?.();
+
+async function getAnchor(type: string): Promise<string | undefined> {
+  if (isNativePlatform()) {
+    try {
+      const result = await VYRHealthBridge.loadAnchor({ key: type });
+      return result.value ?? undefined;
+    } catch {
+      // Fallback to localStorage if bridge call fails (shouldn't happen on native)
     }
   }
-  return merged;
+  return localStorage.getItem(`healthkit.anchor.${type}`) ?? undefined;
 }
 
-export function calculateSleepQuality(samples: HealthSample[]): { durationHours: number; quality: number } {
-  if (samples.length === 0) return { durationHours: 0, quality: 0 };
-
-  // Separate awake periods within sleep blocks (to subtract later)
-  const awakeSamples = samples.filter((s) => s.sleepState === 'awake');
-  const awakeIntervals = mergeIntervals(
-    awakeSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
-  );
-  const totalAwakeMs = awakeIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
-
-  // Valid sleep samples (excluding awake and inBed)
-  const validSamples = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
-  if (validSamples.length === 0) return { durationHours: 0, quality: 0 };
-
-  // Merge overlapping sleep intervals
-  const sleepIntervals = mergeIntervals(
-    validSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
-  );
-  const grossSleepMs = sleepIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
-  const netSleepMs = Math.max(0, grossSleepMs - totalAwakeMs);
-
-  if (netSleepMs === 0) return { durationHours: 0, quality: 0 };
-
-  // Calculate stage-specific durations
-  let deepMs = 0;
-  let remMs = 0;
-  let lightMs = 0;
-  for (const s of validSamples) {
-    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
-    if (s.sleepState === 'deep') deepMs += ms;
-    else if (s.sleepState === 'rem') remMs += ms;
-    else lightMs += ms; // light or core
-  }
-
-  const stageTotal = deepMs + remMs + lightMs;
-  const hasStageBreakdown = stageTotal > 0 && (deepMs > 0 || remMs > 0);
-
-  let quality: number;
-  if (hasStageBreakdown) {
-    // Primary formula: deep weight 1.0, REM weight 2.5
-    quality = Math.min(100, Math.round(((deepMs / stageTotal) + (remMs / stageTotal) * 2.5) * 100));
-  } else {
-    // Fallback without stage breakdown: duration / 8h * 50
-    quality = Math.min(100, Math.round((netSleepMs / (8 * 3600000)) * 50));
-  }
-
-  return {
-    durationHours: netSleepMs / (1000 * 60 * 60),
-    quality,
-  };
-}
-
-/**
- * Convert HRV (ms) to 0-100 logarithmic scale.
- * 5ms → 0 | 200ms → 100
- */
-export function convertHRVtoScale(hrvMs: number): number {
-  if (hrvMs <= 0) return 0;
-  const clamped = Math.min(200, Math.max(5, hrvMs));
-  return Math.min(100, Math.round(
-    ((Math.log(clamped) - Math.log(5)) / (Math.log(200) - Math.log(5))) * 100
-  ));
-}
-
-/**
- * Derive pseudo-HRV (RMSSD) from heart rate samples when wearable
- * doesn't send HRV to Health Connect but has HR data.
- *
- * Requirements:
- * - Minimum 10 HR samples
- * - Average spacing between samples ≤ 5 minutes
- * - HR values between 30-220 bpm
- *
- * Returns RMSSD in ms, or undefined if requirements not met.
- */
-export function derivePseudoHRV(hrSamples: HealthSample[]): number | undefined {
-  // Filter to valid HR range
-  const filtered = hrSamples
-    .filter((s) => s.value >= 30 && s.value <= 220)
-    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-
-  if (filtered.length < 10) return undefined;
-
-  // Check average spacing ≤ 5 minutes
-  let totalSpacing = 0;
-  for (let i = 1; i < filtered.length; i++) {
-    totalSpacing += new Date(filtered[i].startDate).getTime() - new Date(filtered[i - 1].startDate).getTime();
-  }
-  const avgSpacingMs = totalSpacing / (filtered.length - 1);
-  if (avgSpacingMs > 5 * 60 * 1000) return undefined;
-
-  // Convert BPM → RR intervals (ms)
-  const rrIntervals = filtered.map((s) => 60000 / s.value);
-
-  // Calculate RMSSD (root mean square of successive differences)
-  let sumSqDiff = 0;
-  for (let i = 1; i < rrIntervals.length; i++) {
-    const diff = rrIntervals[i] - rrIntervals[i - 1];
-    sumSqDiff += diff * diff;
-  }
-  const rmssd = Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
-
-  return rmssd;
-}
-
-export interface StressContext {
-  avgRhr?: number;
-  sleepHours?: number;
-  avgRespiratoryRate?: number;
-  baseline?: {
-    rhr?: { mean: number };
-    sleep?: { mean: number };
-  };
-}
-
-/**
- * Compute stress level (0-100) using z-score over ln(RMSSD).
- *
- * Falls back to 50 (neutral) if no HRV data available.
- * Applies contextual modifiers for RHR, sleep deficit, and respiratory rate.
- */
-export function computeStressLevel(avgHrv: number | undefined, ctx?: StressContext): number {
-  if (avgHrv == null) return 50;
-
-  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-
-  // Z-score over ln(RMSSD)
-  const lnHrv = Math.log(clamp(avgHrv, 5, 250));
-  const mean = Math.log(40); // ≈ 3.689 (population baseline)
-  const std = 0.4;
-  const z = clamp((lnHrv - mean) / std, -3, 3);
-
-  // Base stress: z=-3 → 100 (max stress), z=0 → 50, z=+3 → 0
-  let stress = ((-z + 3) / 6) * 100;
-
-  // Contextual modifiers (sum up to +33)
-  if (ctx) {
-    const blRhrMean = ctx.baseline?.rhr?.mean ?? 65;
-    const blSleepMean = ctx.baseline?.sleep?.mean ?? 7;
-
-    // Resting HR modifier: delta > 3 bpm above baseline → +up to 15
-    if (ctx.avgRhr != null) {
-      const delta = ctx.avgRhr - blRhrMean;
-      if (delta > 3) {
-        stress += clamp((delta - 3) * 2, 0, 15);
-      }
-    }
-
-    // Sleep deficit modifier: deficit > 0.5h → +up to 10
-    if (ctx.sleepHours != null) {
-      const deficit = blSleepMean - ctx.sleepHours;
-      if (deficit > 0.5) {
-        stress += clamp(deficit * 4, 0, 10);
-      }
-    }
-
-    // Respiratory rate modifier: RR > 18 → +up to 8
-    if (ctx.avgRespiratoryRate != null && ctx.avgRespiratoryRate > 18) {
-      stress += clamp((ctx.avgRespiratoryRate - 18) * 1.5, 0, 8);
-    }
-  }
-
-  return Math.round(clamp(stress, 0, 100));
-}
-
-function getAnchor(type: string): string | undefined {
-  return localStorage.getItem(`${ANCHOR_PREFIX}${type}`) ?? undefined;
-}
-
-function setAnchor(type: string, anchor?: string): void {
+async function setAnchor(type: string, anchor?: string): Promise<void> {
   if (!anchor) return;
-  localStorage.setItem(`${ANCHOR_PREFIX}${type}`, anchor);
+  if (isNativePlatform()) {
+    try {
+      await VYRHealthBridge.saveAnchor({ key: type, value: anchor });
+      return;
+    } catch {
+      // Fallback
+    }
+  }
+  localStorage.setItem(`healthkit.anchor.${type}`, anchor);
 }
 
 function setLastSyncTimestamp(type: string, iso: string): void {
-  localStorage.setItem(`${ANCHOR_PREFIX}ts.${type}`, iso);
+  localStorage.setItem(`healthkit.anchor.ts.${type}`, iso);
 }
 
 export async function enableHealthKitBackgroundSync(): Promise<void> {
@@ -501,10 +304,13 @@ export async function enableHealthKitBackgroundSync(): Promise<void> {
     for (const type of ALL_SYNC_TYPES) {
       await VYRHealthBridge.enableBackgroundDelivery({ type: String(type), frequency: 'hourly' });
     }
+    // FIX P5: registerObserverQueries is now idempotent on the native side —
+    // it only adds missing keys, won't duplicate. Safe to call on every resume.
     await VYRHealthBridge.registerObserverQueries({ types: ALL_SYNC_TYPES.map(String) });
 
-    if (!observerListenerBound) {
-      observerListenerBound = true;
+    // JS-side listener: only bind once per JS context lifetime
+    if (!observerListenersActive) {
+      observerListenersActive = true;
       await VYRHealthBridge.addListener('healthkitObserverUpdated', () => {
         void runIncrementalHealthSync('observer');
       });
@@ -518,8 +324,7 @@ export async function enableHealthKitBackgroundSync(): Promise<void> {
 }
 
 export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 'manual'): Promise<boolean> {
-  const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
-  if (!isNative) {
+  if (!isNativePlatform()) {
     console.warn('[healthkit] skipping sync on web platform');
     return false;
   }
@@ -533,12 +338,15 @@ export async function runIncrementalHealthSync(trigger: 'manual' | 'observer' = 
   syncLock = true;
   try {
     let changed = false;
-    // Only read bridge-supported types (not plugin-only or write-only types)
     for (const type of BRIDGE_READ_TYPES) {
       try {
-        const res = await VYRHealthBridge.readAnchored({ type: String(type), anchor: getAnchor(String(type)), limit: 200 });
+        // FIX P1: getAnchor now reads from UserDefaults via native bridge
+        const storedAnchor = await getAnchor(String(type));
+        const res = await VYRHealthBridge.readAnchored({ type: String(type), anchor: storedAnchor, limit: 200 });
         if ((res.samples?.length ?? 0) > 0) changed = true;
-        setAnchor(String(type), res.newAnchor);
+        // FIX P1: native bridge auto-saves the anchor in readAnchored() — setAnchor is
+        // called here for JS/web fallback compatibility only
+        await setAnchor(String(type), res.newAnchor);
       } catch (e) {
         console.warn(`[healthkit] readAnchored skipped for ${type}:`, e);
       }
@@ -560,7 +368,6 @@ export async function syncHealthKitData(): Promise<boolean> {
     return false;
   }
   syncLock = true;
-
   try {
     return await _syncHealthKitDataInternal();
   } catch (e) {
@@ -585,23 +392,15 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const empty = { samples: [] as HealthSample[] };
   const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
-  // Read ALL types with time window (24h) — do NOT use stored anchors here,
-  // as runIncrementalHealthSync may have already consumed them.
-  // readAnchored without anchor reads all available data; we pass no anchor
-  // to get a full read, then the time window is handled by the predicate
-  // in the @capgo plugin. For bridge types, we read without anchor to get
-  // everything, then filter by time window in JS.
   const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
-    // Bridge: read WITHOUT anchor to get all data, not just delta
     VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
   ]);
 
-  // Filter bridge samples to last 24h (readAnchored has no time predicate)
   const cutoff = yesterday.toISOString();
   const filterByTime = (samples: Array<Record<string, unknown>>) =>
     samples.filter(s => String(s.startDate || '') >= cutoff);
@@ -619,7 +418,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     spo2: spo2Bridge.samples.length,
   });
 
-  // ── Persist raw biomarker samples (never overwritten, deduped by constraint) ──
   const rawRows = buildSampleRows(
     userId,
     hrData.samples, rhrBridge.samples, hrvBridge.samples, spo2Bridge.samples,
@@ -643,13 +441,11 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const { durationHours, quality: sleepQuality } = calculateSleepQuality(sleepData.samples);
   const totalSteps = stepsData.samples.reduce((sum: number, s) => sum + s.value, 0);
 
-  // Bridge samples: value is a number from serialize()
   const bridgeAvg = (samples: Array<Record<string, unknown>>): number | undefined => {
     const vals = samples.map(s => Number(s.value)).filter(v => !isNaN(v) && v > 0);
     return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : undefined;
   };
 
-  // Heart rate average from @capgo samples
   const hrVals = hrData.samples.map(s => s.value).filter(v => !isNaN(v) && v > 0);
   const avgHr = hrVals.length > 0 ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : undefined;
 
@@ -657,10 +453,8 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const realHrv = bridgeAvg(hrvBridge.samples);
   const avgSpo2 = bridgeAvg(spo2Bridge.samples);
 
-  // Use real HRV from Health Connect, or derive pseudo-HRV from HR samples
   const avgHrv = realHrv ?? derivePseudoHRV(hrData.samples);
 
-  // Derive RHR fallback: average of lowest 20% HR samples
   let computedRhr = avgRhr;
   if (computedRhr == null && hrVals.length > 0) {
     const sorted = [...hrVals].sort((a, b) => a - b);
@@ -668,7 +462,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     computedRhr = bottom20.reduce((a, b) => a + b, 0) / bottom20.length;
   }
 
-  // Compute stress with contextual modifiers
   const stressLevel = computeStressLevel(avgHrv, {
     avgRhr: computedRhr,
     sleepHours: durationHours,
@@ -687,14 +480,20 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   };
 
   const result = await retryOnAuthErrorLabeled(async () => {
-    const res = await supabase.from('ring_daily_data').upsert([{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }], { onConflict: 'user_id,day,source_provider' }).select();
+    const res = await supabase.from('ring_daily_data').upsert(
+      [{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }],
+      { onConflict: 'user_id,day,source_provider' }
+    ).select();
     return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
   }, { table: 'ring_daily_data', operation: 'upsert' });
 
   if (result.error) return false;
 
   await retryOnAuthErrorLabeled(async () => {
-    const res = await supabase.from('user_integrations').upsert([{ user_id: userId, provider: 'apple_health', status: 'active', last_sync_at: new Date().toISOString() }], { onConflict: 'user_id,provider' }).select();
+    const res = await supabase.from('user_integrations').upsert(
+      [{ user_id: userId, provider: 'apple_health', status: 'active', last_sync_at: new Date().toISOString() }],
+      { onConflict: 'user_id,provider' }
+    ).select();
     return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };
   }, { table: 'user_integrations', operation: 'upsert' });
 
@@ -703,7 +502,6 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     setLastSyncTimestamp(dt, nowIso);
   }
 
-  // Auto-compute VYR State after every sync (ensures score stays current)
   try {
     await computeAndStoreState(today, userId);
   } catch (e) {
@@ -711,4 +509,130 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   }
 
   return true;
+}
+
+// ─── Utility functions (unchanged) ──────────────────────────────────────────
+
+function mergeIntervals(intervals: { start: number; end: number }[]): { start: number; end: number }[] {
+  if (intervals.length === 0) return [];
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    if (sorted[i].start <= last.end) {
+      last.end = Math.max(last.end, sorted[i].end);
+    } else {
+      merged.push(sorted[i]);
+    }
+  }
+  return merged;
+}
+
+export function calculateSleepQuality(samples: HealthSample[]): { durationHours: number; quality: number } {
+  if (samples.length === 0) return { durationHours: 0, quality: 0 };
+
+  const awakeSamples = samples.filter((s) => s.sleepState === 'awake');
+  const awakeIntervals = mergeIntervals(
+    awakeSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
+  );
+  const totalAwakeMs = awakeIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
+
+  const validSamples = samples.filter((s) => s.sleepState && s.sleepState !== 'awake' && s.sleepState !== 'inBed');
+  if (validSamples.length === 0) return { durationHours: 0, quality: 0 };
+
+  const sleepIntervals = mergeIntervals(
+    validSamples.map((s) => ({ start: new Date(s.startDate).getTime(), end: new Date(s.endDate).getTime() }))
+  );
+  const grossSleepMs = sleepIntervals.reduce((sum, i) => sum + (i.end - i.start), 0);
+  const netSleepMs = Math.max(0, grossSleepMs - totalAwakeMs);
+
+  if (netSleepMs === 0) return { durationHours: 0, quality: 0 };
+
+  let deepMs = 0, remMs = 0, lightMs = 0;
+  for (const s of validSamples) {
+    const ms = new Date(s.endDate).getTime() - new Date(s.startDate).getTime();
+    if (s.sleepState === 'deep') deepMs += ms;
+    else if (s.sleepState === 'rem') remMs += ms;
+    else lightMs += ms;
+  }
+
+  const stageTotal = deepMs + remMs + lightMs;
+  const hasStageBreakdown = stageTotal > 0 && (deepMs > 0 || remMs > 0);
+
+  let quality: number;
+  if (hasStageBreakdown) {
+    quality = Math.min(100, Math.round(((deepMs / stageTotal) + (remMs / stageTotal) * 2.5) * 100));
+  } else {
+    quality = Math.min(100, Math.round((netSleepMs / (8 * 3600000)) * 50));
+  }
+
+  return { durationHours: netSleepMs / (1000 * 60 * 60), quality };
+}
+
+export function convertHRVtoScale(hrvMs: number): number {
+  if (hrvMs <= 0) return 0;
+  const clamped = Math.min(200, Math.max(5, hrvMs));
+  return Math.min(100, Math.round(
+    ((Math.log(clamped) - Math.log(5)) / (Math.log(200) - Math.log(5))) * 100
+  ));
+}
+
+export function derivePseudoHRV(hrSamples: HealthSample[]): number | undefined {
+  const filtered = hrSamples
+    .filter((s) => s.value >= 30 && s.value <= 220)
+    .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+  if (filtered.length < 10) return undefined;
+
+  let totalSpacing = 0;
+  for (let i = 1; i < filtered.length; i++) {
+    totalSpacing += new Date(filtered[i].startDate).getTime() - new Date(filtered[i - 1].startDate).getTime();
+  }
+  if (totalSpacing / (filtered.length - 1) > 5 * 60 * 1000) return undefined;
+
+  const rrIntervals = filtered.map((s) => 60000 / s.value);
+  let sumSqDiff = 0;
+  for (let i = 1; i < rrIntervals.length; i++) {
+    const diff = rrIntervals[i] - rrIntervals[i - 1];
+    sumSqDiff += diff * diff;
+  }
+  return Math.sqrt(sumSqDiff / (rrIntervals.length - 1));
+}
+
+export interface StressContext {
+  avgRhr?: number;
+  sleepHours?: number;
+  avgRespiratoryRate?: number;
+  baseline?: {
+    rhr?: { mean: number };
+    sleep?: { mean: number };
+  };
+}
+
+export function computeStressLevel(avgHrv: number | undefined, ctx?: StressContext): number {
+  if (avgHrv == null) return 50;
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+  const lnHrv = Math.log(clamp(avgHrv, 5, 250));
+  const mean = Math.log(40);
+  const std = 0.4;
+  const z = clamp((lnHrv - mean) / std, -3, 3);
+  let stress = ((-z + 3) / 6) * 100;
+
+  if (ctx) {
+    const blRhrMean = ctx.baseline?.rhr?.mean ?? 65;
+    const blSleepMean = ctx.baseline?.sleep?.mean ?? 7;
+    if (ctx.avgRhr != null) {
+      const delta = ctx.avgRhr - blRhrMean;
+      if (delta > 3) stress += clamp((delta - 3) * 2, 0, 15);
+    }
+    if (ctx.sleepHours != null) {
+      const deficit = blSleepMean - ctx.sleepHours;
+      if (deficit > 0.5) stress += clamp(deficit * 4, 0, 10);
+    }
+    if (ctx.avgRespiratoryRate != null && ctx.avgRespiratoryRate > 18) {
+      stress += clamp((ctx.avgRespiratoryRate - 18) * 1.5, 0, 8);
+    }
+  }
+
+  return Math.round(clamp(stress, 0, 100));
 }

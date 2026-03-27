@@ -45,6 +45,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- FIX P6: UIBackgroundModes required for HealthKit background delivery entitlement -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>health-kit</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
