@@ -7,9 +7,7 @@ import { toast } from '@/hooks/use-toast';
 
 function getPasswordResetRedirectUrl(): string {
   const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
-  if (isNative) {
-    return 'com.vyrlabs.app://reset-password';
-  }
+  if (isNative) return 'com.vyrlabs.app://reset-password';
   return `${window.location.origin}/reset-password`;
 }
 
@@ -18,17 +16,27 @@ const ForgotPassword = () => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
     setLoading(true);
+    setRateLimitSeconds(null);
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: getPasswordResetRedirectUrl(),
     });
     setLoading(false);
     if (error) {
-      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+      const msg = error.message || '';
+      const secondsMatch = msg.match(/(\d+)\s*second/i);
+      if (error.status === 429 || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('security purposes')) {
+        const seconds = secondsMatch ? parseInt(secondsMatch[1]) : 60;
+        setRateLimitSeconds(seconds);
+        toast({ title: 'Aguarde um momento', description: `Por segurança, aguarde ${seconds}s antes de tentar novamente.`, variant: 'destructive' });
+      } else {
+        toast({ title: 'Erro', description: msg, variant: 'destructive' });
+      }
     } else {
       setSent(true);
     }
@@ -53,11 +61,11 @@ const ForgotPassword = () => {
             <h2 className="text-xl font-semibold text-foreground">Email enviado</h2>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Enviamos um link para <span className="text-foreground font-medium">{email}</span>.
-              Abra o email no seu celular e toque no link — ele abrirá o app direto na tela de nova senha.
+              Abra o email no celular e toque no link — ele abrirá o app direto na tela de nova senha.
             </p>
             <p className="text-xs text-muted-foreground mt-2">
-              Não recebeu? Verifique a pasta de spam ou{' '}
-              <button className="underline hover:text-foreground transition-colors" onClick={() => setSent(false)}>
+              Não recebeu? Verifique o spam ou{' '}
+              <button className="underline hover:text-foreground transition-colors" onClick={() => { setSent(false); setRateLimitSeconds(null); }}>
                 tente novamente
               </button>.
             </p>
@@ -72,22 +80,18 @@ const ForgotPassword = () => {
                 <div className="relative">
                   <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="seu@email.com"
-                    required
-                    autoCapitalize="none"
-                    autoCorrect="off"
+                    type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="seu@email.com" required autoCapitalize="none" autoCorrect="off"
                     className="w-full rounded-xl border border-border bg-background pl-9 pr-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:ring-1 focus:ring-ring transition-colors"
                   />
                 </div>
               </div>
-              <button
-                type="submit"
-                disabled={loading || !email.trim()}
-                className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50"
-              >
+              {rateLimitSeconds && (
+                <p className="text-xs text-amber-500 bg-amber-500/10 rounded-lg px-3 py-2">
+                  Por segurança, aguarde {rateLimitSeconds}s antes de tentar novamente.
+                </p>
+              )}
+              <button type="submit" disabled={loading} className="w-full rounded-xl bg-primary text-primary-foreground font-medium py-3.5 text-sm transition-all active:scale-[0.98] hover:opacity-90 disabled:opacity-50">
                 {loading ? 'Enviando...' : 'Enviar link de recuperação'}
               </button>
             </form>
