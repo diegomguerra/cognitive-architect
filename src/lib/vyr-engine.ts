@@ -12,8 +12,16 @@ export interface BiometricData {
   hrvIndex?: number;      // 0-100 (already normalized)
   hrvRawMs?: number;      // ms (SDNN) — raw, will be normalized
   stressLevel?: number;   // 0-100
-  tempDeviation?: number; // °C deviation from baseline
+  tempDeviation?: number;     // °C deviation from baseline
+  respiratoryRate?: number;   // breaths per minute (resting)
   activityLevel?: 'high' | 'moderate' | 'low' | null;
+  // F1b — extended biomarkers
+  vo2Max?: number;            // ml/kg/min
+  skinTempDelta?: number;     // °C delta from nocturnal baseline (HealthKit)
+  activeEnergyKcal?: number;  // kcal burned (active, today)
+  basalEnergyKcal?: number;   // kcal burned (basal metabolic rate)
+  walkingHrAvg?: number;      // bpm average during walking
+  hrRecovery1Min?: number;    // bpm drop 1 min post-exercise
   // Subjective perceptions (0-10 scale, from daily_reviews)
   subjectiveEnergy?: number;
   subjectiveClarity?: number;
@@ -196,10 +204,87 @@ export function computePillars(data: BiometricData, baseline?: BaselineValues): 
   };
 }
 
+/**
+ * VYR Score v4 — Geometric mean ponderada + penalização por desequilíbrio + modificador de trajetória
+ *
+ * Substitui a fórmula v3 (avg*0.6 + min*0.4) que:
+ * — ignorava interações multiplicativas entre pilares
+ * — era insensível à trajetória temporal
+ * — aplicava penalização fixa independente do gap entre pilares
+ *
+ * Nova fórmula:
+ *   score_base = (E^0.35 × C^0.30 × S^0.35) / 5 × 100   ← geometric mean ponderada
+ *   spread = max(E,C,S) − min(E,C,S)
+ *   imbalance_penalty = spread > 1.5 ? (spread − 1.5) × 0.06 : 0
+ *   trend_mod = clamp(1 + rhr_trend_3d × −0.02, 0.90, 1.10)
+ *   score = round(clamp(score_base × (1 − penalty) × trend_mod, 0, 100))
+ *
+ * Caso crítico E5 + C5 + S1:
+ *   v3 → score 52 (subestimado)
+ *   v4 → score ≈ 38 (reflecte o colapso real)
+ *
+ * @param pillars        — pillar scores (0–5 each)
+ * @param rhr_trend_3d   — slope OLS 3 dias de RHR (de vyr-features); null = sem modificador
+ * @param quality_scores — cobertura de dados por pilar (0–1); aplica até –15% por pilar sem dados
+ */
+export function computeScoreV4(
+  pillars: PillarScore,
+  rhr_trend_3d?: number | null,
+  quality_scores?: { energia?: number; clareza?: number; estabilidade?: number },
+): number {
+  const { energia: E, clareza: C, estabilidade: S } = pillars;
+
+  // ── 1. Geometric mean ponderada ───────────────────────────────────────────
+  // Expoentes: E=0.35, C=0.30, S=0.35 (Estabilidade e Energia dominam)
+  // Evita log(0) — pilares mínimos em 0.01
+  const eS = Math.max(0.01, E);
+  const cS = Math.max(0.01, C);
+  const sS = Math.max(0.01, S);
+  const geomMean = Math.pow(eS, 0.35) * Math.pow(cS, 0.30) * Math.pow(sS, 0.35);
+  const scoreBase = (geomMean / 5) * 100;
+
+  // ── 2. Penalização por desequilíbrio ──────────────────────────────────────
+  // spread > 1.5 → cada ponto adicional reduz 6% do score
+  // Ex: spread 4.0 → penalty = (4.0 − 1.5) × 0.06 = 0.15 = −15%
+  const spread = Math.max(E, C, S) - Math.min(E, C, S);
+  const imbalancePenalty = spread > 1.5 ? (spread - 1.5) * 0.06 : 0;
+
+  // ── 3. Modificador de trajetória (rhr_trend_3d) ───────────────────────────
+  // RHR subindo (+) = sobrecarga acumulada → penaliza score
+  // RHR caindo (−) = recuperação → bonifica score
+  // Clampado a [0.90, 1.10] — máximo ±10% de variação
+  let trendMod = 1.0;
+  if (rhr_trend_3d != null && !isNaN(rhr_trend_3d)) {
+    trendMod = clamp(1 + rhr_trend_3d * -0.02, 0.90, 1.10);
+  }
+
+  // ── 4. Penalização por dados ausentes (data quality) ──────────────────────
+  // Cada pilar com cobertura < 1.0 reduz até 15% do score
+  // gap_penalty = (1 − quality) × 0.15
+  let qualityPenalty = 0;
+  if (quality_scores) {
+    const qE = quality_scores.energia ?? 1;
+    const qC = quality_scores.clareza ?? 1;
+    const qS = quality_scores.estabilidade ?? 1;
+    // Média das penalizações ponderada pelos expoentes dos pilares
+    qualityPenalty = (
+      (1 - qE) * 0.15 * 0.35 +
+      (1 - qC) * 0.15 * 0.30 +
+      (1 - qS) * 0.15 * 0.35
+    );
+  }
+
+  // ── 5. Score final ────────────────────────────────────────────────────────
+  const raw = scoreBase * (1 - imbalancePenalty) * trendMod * (1 - qualityPenalty);
+  return Math.round(clamp(raw, 0, 100));
+}
+
+/**
+ * @deprecated Use computeScoreV4 for new engine logic.
+ * Mantido para compatibilidade — pode ser removido após migração completa.
+ */
 export function computeScore(pillars: PillarScore): number {
-  const avg = (pillars.energia + pillars.clareza + pillars.estabilidade) / 3;
-  const min = Math.min(pillars.energia, pillars.clareza, pillars.estabilidade);
-  return Math.round((avg * 0.6 + min * 0.4) / 5 * 100);
+  return computeScoreV4(pillars);
 }
 
 export function getLevel(score: number): string {
@@ -323,9 +408,21 @@ export function getScoreColorVar(score: number): string {
   return '--vyr-score-critico';
 }
 
-export function computeState(data: BiometricData, baseline?: BaselineValues): VYRState {
+export function computeState(
+  data: BiometricData,
+  baseline?: BaselineValues,
+  features?: { rhr_trend_3d?: number | null; quality_energia?: number; quality_clareza?: number; quality_estabilidade?: number } | null,
+): VYRState {
   const pillars = computePillars(data, baseline);
-  const score = computeScore(pillars);
+  const score = computeScoreV4(
+    pillars,
+    features?.rhr_trend_3d ?? null,
+    features ? {
+      energia: features.quality_energia,
+      clareza: features.quality_clareza,
+      estabilidade: features.quality_estabilidade,
+    } : undefined,
+  );
   return {
     score,
     level: getLevel(score),

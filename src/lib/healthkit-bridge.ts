@@ -12,6 +12,18 @@ export interface VYRHealthBridgePlugin {
   enableBackgroundDelivery(options: { type: string; frequency?: 'immediate' | 'hourly' | 'daily' }): Promise<{ success: boolean }>;
   registerObserverQueries(options: { types: string[] }): Promise<{ registered: number }>;
   readAnchored(options: { type: string; anchor?: string; limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+
+  // ── F1b: Extended reads (direct methods) ──────────────────────
+  readBodyTemperature(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readBloodPressure(options?: { limit?: number }): Promise<{ samples: Array<{ systolic: number; diastolic: number; startDate: string; endDate: string; uuid?: string }>; newAnchor?: string }>;
+  readVO2Max(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readActiveEnergyBurned(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readBasalEnergyBurned(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readRespiratoryRate(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readWalkingHeartRateAverage(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readHeartRateRecovery(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+  readSkinTemperature(options?: { limit?: number }): Promise<{ samples: Array<Record<string, unknown>>; newAnchor?: string }>;
+
   requestAuthorization(options: { readTypes?: string[]; writeTypes?: string[] }): Promise<{ granted: boolean }>;
 
   // FIX P1: Native persistence — anchors and connection state stored in UserDefaults,

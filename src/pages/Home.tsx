@@ -107,7 +107,7 @@ function PillarCard({ name, value, description, index }: { name: string; value: 
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
-  const { state, hasData, userName, actionsTaken, sachetConfirmation } = store;
+  const { state, hasData, userName, actionsTaken, sachetConfirmation, prediction, anomaly, engineMode } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
 
   const interpretation = useMemo(() => interpret(state), [state]);
@@ -212,6 +212,21 @@ const Home = () => {
           </>
         ) : (
           <>
+            {/* ── Badge Calibrando (F6) ── */}
+            {(engineMode === 'bootstrap' || engineMode === 'adaptive') && (
+              <div
+                className="flex items-center justify-center gap-2 py-2 rounded-xl"
+                style={{ background: '#0F172A', border: '1px solid #1E3A5F' }}
+              >
+                <div
+                  className="w-1.5 h-1.5 rounded-full animate-pulse"
+                  style={{ background: '#60A5FA' }}
+                />
+                <span className="text-[10px] uppercase" style={{ color: '#60A5FA', letterSpacing: '0.15em', fontWeight: 500 }}>
+                  {engineMode === 'bootstrap' ? 'Calibrando · Coletando dados iniciais' : 'Adaptando · Modelo em calibração'}
+                </span>
+              </div>
+            )}
             {/* ── 2. Card "Hoje isso significa" ── */}
             <button
               onClick={() => navigate('/state')}
@@ -234,6 +249,53 @@ const Home = () => {
               </div>
             </button>
 
+
+            {/* ── Previsão de Amanhã (F6) ── */}
+            {prediction && (
+              <div
+                className="rounded-2xl p-4"
+                style={{ background: '#0D1B12', border: '1px solid #1A3020' }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3
+                    className="text-xs uppercase"
+                    style={{ fontWeight: 500, color: '#34D399', letterSpacing: '0.16em' }}
+                  >
+                    Previsão de amanhã
+                  </h3>
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full"
+                    style={{
+                      background: prediction.confidence_level === 'high' ? '#052e16' : prediction.confidence_level === 'medium' ? '#1c1917' : '#0f172a',
+                      color: prediction.confidence_level === 'high' ? '#34D399' : prediction.confidence_level === 'medium' ? '#FBBF24' : '#60A5FA',
+                      fontWeight: 500,
+                    }}
+                  >
+                    {prediction.confidence_level === 'high' ? 'Alta confiança' : prediction.confidence_level === 'medium' ? 'Confiança média' : 'Estimativa'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-4xl font-light tabular-nums"
+                    style={{ color: '#34D399', letterSpacing: '-0.03em' }}
+                  >
+                    {prediction.score}
+                  </span>
+                  <div>
+                    <p className="text-xs" style={{ color: '#4B7A5A', fontWeight: 400 }}>
+                      {prediction.score > state.score
+                        ? `+${prediction.score - state.score} pontos vs hoje`
+                        : prediction.score < state.score
+                        ? `${prediction.score - state.score} pontos vs hoje`
+                        : 'Estável em relação a hoje'}
+                    </p>
+                    <p className="text-[10px] mt-0.5" style={{ color: '#2D5040', fontWeight: 300 }}>
+                      Baseado em HRV, sono e tendência de FC
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* ── 3. Índices (Energia / Clareza / Estabilidade) ── */}
             <PillarCard
               name="Energia"
@@ -254,6 +316,41 @@ const Home = () => {
               index={2}
             />
 
+            {/* ── Alerta de Anomalia (F6 — Isolation Forest) ── */}
+            {anomaly && (
+              <div
+                className="rounded-2xl p-4"
+                style={{
+                  background: anomaly.severity === 'high' ? '#1A0000' : '#1A0F00',
+                  border: `1px solid ${anomaly.severity === 'high' ? '#3D0000' : '#3D2000'}`,
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  <AlertCircle
+                    size={18}
+                    className="flex-shrink-0 mt-0.5"
+                    style={{ color: anomaly.severity === 'high' ? '#EF4444' : '#F97316' }}
+                  />
+                  <div>
+                    <h4
+                      className="text-xs uppercase"
+                      style={{
+                        fontWeight: 500,
+                        color: anomaly.severity === 'high' ? '#EF4444' : '#F97316',
+                        letterSpacing: '0.14em',
+                      }}
+                    >
+                      {anomaly.severity === 'high' ? 'Padrão incomum detectado' : 'Variação detectada'}
+                    </h4>
+                    <p className="text-xs mt-1.5 leading-relaxed" style={{ color: '#99AABB', fontWeight: 400 }}>
+                      {Object.keys(anomaly.features_flagged).length > 0
+                        ? `Marcadores fora do padrão: ${Object.keys(anomaly.features_flagged).join(', ')}.`
+                        : 'Combinação incomum de biomarcadores detectada.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* ── 4. Leitura do sistema (unified) ── */}
             <div className="rounded-2xl p-4" style={{ background: '#0D0D0D', border: '1px solid #1A1A1A' }}>
               <div className="flex items-start gap-3">

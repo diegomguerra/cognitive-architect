@@ -16,6 +16,8 @@ import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 import { computeAndStoreState } from './vyr-recompute';
+import { computeStressLevelV4 } from './vyr-stress';
+import { computeStateViaEdge } from './vyr-compute-client';
 
 // Types the @capgo/capacitor-health plugin actually supports
 export const HEALTH_READ_TYPES: HealthDataType[] = [
@@ -28,11 +30,14 @@ export const HEALTH_WRITE_TYPES: HealthDataType[] = [
 // Types read via VYRHealthBridge.readAnchored (not supported by @capgo plugin)
 export const BRIDGE_READ_TYPES = [
   'restingHeartRate', 'heartRateVariability', 'oxygenSaturation',
+  'respiratoryRate', 'vo2Max', 'skinTemperature',
+  'activeEnergyBurned', 'basalEnergyBurned',
+  'walkingHeartRateAverage', 'heartRateRecovery',
 ] as const;
 
 // Types handled exclusively by the Swift bridge for writes
 export const BRIDGE_ONLY_WRITE_TYPES = [
-  'bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+  'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic',
 ] as const;
 
 // All types for background delivery (plugin + bridge)
@@ -227,6 +232,23 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
   }
 }
 
+/**
+ * Silently check if HealthKit permissions are granted without showing a dialog.
+ * Exported for vyr-collector.ts compatibility with Android interface.
+ * Uses actual authorization status check (P3 approach).
+ */
+export async function checkHealthKitPermissions(): Promise<boolean> {
+  const isNative = !!(window as any).Capacitor?.isNativePlatform?.();
+  if (!isNative) return false;
+  try {
+    const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])] as string[];
+    const statuses = await getAuthorizationStatuses(allTypes);
+    return Object.values(statuses).some(s => s === 'sharingAuthorized');
+  } catch {
+    return false;
+  }
+}
+
 export async function writeHealthSample(dataType: string, value: number, startDate: string, endDate?: string): Promise<boolean> {
   try {
     if (dataType === 'bodyTemperature') {
@@ -392,22 +414,42 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const empty = { samples: [] as HealthSample[] };
   const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
-  const [sleepData, stepsData, hrData, rhrBridge, hrvBridge, spo2Bridge] = await Promise.all([
+  const [
+    sleepData, stepsData, hrData,
+    rhrBridge, hrvBridge, spo2Bridge, rrBridge,
+    vo2MaxBridge, skinTempBridge,
+    activeEnergyBridge, basalEnergyBridge,
+    walkingHrBridge, hrRecoveryBridge,
+  ] = await Promise.all([
     Health.readSamples({ ...queryOpts, dataType: 'sleep' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'steps' }).catch(() => empty),
     Health.readSamples({ ...queryOpts, dataType: 'heartRate' }).catch(() => empty),
     VYRHealthBridge.readAnchored({ type: 'restingHeartRate', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge),
     VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'respiratoryRate', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'vo2Max', limit: 100 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'skinTemperature', limit: 100 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'activeEnergyBurned', limit: 500 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'basalEnergyBurned', limit: 100 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'walkingHeartRateAverage', limit: 100 }).catch(() => emptyBridge),
+    VYRHealthBridge.readAnchored({ type: 'heartRateRecovery', limit: 100 }).catch(() => emptyBridge),
   ]);
 
   const cutoff = yesterday.toISOString();
   const filterByTime = (samples: Array<Record<string, unknown>>) =>
     samples.filter(s => String(s.startDate || '') >= cutoff);
 
-  rhrBridge.samples = filterByTime(rhrBridge.samples);
-  hrvBridge.samples = filterByTime(hrvBridge.samples);
-  spo2Bridge.samples = filterByTime(spo2Bridge.samples);
+  rhrBridge.samples     = filterByTime(rhrBridge.samples);
+  hrvBridge.samples     = filterByTime(hrvBridge.samples);
+  spo2Bridge.samples    = filterByTime(spo2Bridge.samples);
+  rrBridge.samples      = filterByTime(rrBridge.samples);
+  vo2MaxBridge.samples  = filterByTime(vo2MaxBridge.samples);
+  skinTempBridge.samples       = filterByTime(skinTempBridge.samples);
+  activeEnergyBridge.samples   = filterByTime(activeEnergyBridge.samples);
+  basalEnergyBridge.samples    = filterByTime(basalEnergyBridge.samples);
+  walkingHrBridge.samples      = filterByTime(walkingHrBridge.samples);
+  hrRecoveryBridge.samples     = filterByTime(hrRecoveryBridge.samples);
 
   console.info('[healthkit] sync samples count', {
     sleep: sleepData.samples.length,
@@ -452,8 +494,24 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const avgRhr = bridgeAvg(rhrBridge.samples);
   const realHrv = bridgeAvg(hrvBridge.samples);
   const avgSpo2 = bridgeAvg(spo2Bridge.samples);
+  const avgRR   = bridgeAvg(rrBridge.samples);
 
-  const avgHrv = realHrv ?? derivePseudoHRV(hrData.samples);
+  // F1b extended metrics
+  const avgVo2Max          = bridgeAvg(vo2MaxBridge.samples);
+  const avgBasalEnergyKcal = bridgeAvg(basalEnergyBridge.samples);
+  const avgWalkingHr       = bridgeAvg(walkingHrBridge.samples);
+  const avgHrRecovery1Min  = bridgeAvg(hrRecoveryBridge.samples);
+  const activeEnergyKcal   = activeEnergyBridge.samples.length > 0
+    ? activeEnergyBridge.samples.reduce((sum, s) => sum + Number(s.value || 0), 0)
+    : undefined;
+  const latestSkinTemp = skinTempBridge.samples.length > 0
+    ? Number(skinTempBridge.samples[skinTempBridge.samples.length - 1].value ?? 0)
+    : undefined;
+
+  // HRV: marca se é real (wearable) ou derivado de FC
+  const pseudoHrv = derivePseudoHRV(hrData.samples);
+  const avgHrv = realHrv ?? pseudoHrv;
+  const hrvIsReal = realHrv != null;
 
   let computedRhr = avgRhr;
   if (computedRhr == null && hrVals.length > 0) {
@@ -462,21 +520,37 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     computedRhr = bottom20.reduce((a, b) => a + b, 0) / bottom20.length;
   }
 
-  const stressLevel = computeStressLevel(avgHrv, {
+  // Stress cascade: HRV real → HRV derivado de FC → RHR+sono+RR → fallback 50
+  const stressLevel = computeStressLevelV4(avgHrv, {
     avgRhr: computedRhr,
     sleepHours: durationHours,
+    sleepQuality: sleepQuality || undefined,
+    avgRespiratoryRate: avgRR,
+    skinTempDelta: latestSkinTemp ?? undefined,
+    hrvIsReal,
   });
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
     rhr: computedRhr ? Math.round(computedRhr) : null,
     hrv_sdnn: avgHrv ? Math.round(avgHrv * 10) / 10 : null,
+    hrv_rmssd: !hrvIsReal && avgHrv ? Math.round(avgHrv * 10) / 10 : null,
     hrv_index: avgHrv ? convertHRVtoScale(avgHrv) : null,
+    hrv_type: avgHrv ? (hrvIsReal ? 'sdnn' as const : 'rmssd_derived' as const) : null,
+    hrv_source: avgHrv ? (hrvIsReal ? 'wearable' as const : 'derived_from_hr' as const) : null,
     stress_level: stressLevel,
     sleep_duration_hours: Math.round(durationHours * 10) / 10,
     sleep_quality: sleepQuality,
     steps: totalSteps,
     spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
+    // F1b extended biomarkers
+    respiratory_rate: avgRR ? Math.round(avgRR * 10) / 10 : null,
+    vo2_max: avgVo2Max ? Math.round(avgVo2Max * 10) / 10 : null,
+    skin_temp_delta: latestSkinTemp != null ? Math.round(latestSkinTemp * 100) / 100 : null,
+    active_energy_kcal: activeEnergyKcal ? Math.round(activeEnergyKcal) : null,
+    basal_energy_kcal: avgBasalEnergyKcal ? Math.round(avgBasalEnergyKcal) : null,
+    walking_hr_avg: avgWalkingHr ? Math.round(avgWalkingHr * 10) / 10 : null,
+    hr_recovery_1min: avgHrRecovery1Min ? Math.round(avgHrRecovery1Min * 10) / 10 : null,
   };
 
   const result = await retryOnAuthErrorLabeled(async () => {
@@ -502,10 +576,14 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     setLastSyncTimestamp(dt, nowIso);
   }
 
+  // F5b: Edge Function v4 server-side compute + local fallback
   try {
-    await computeAndStoreState(today, userId);
+    const edgeResult = await computeStateViaEdge(today);
+    if (!edgeResult) {
+      await computeAndStoreState(today, userId);
+    }
   } catch (e) {
-    console.warn('[healthkit] post-sync computeAndStoreState failed:', e);
+    console.warn('[healthkit] post-sync compute failed:', e);
   }
 
   return true;

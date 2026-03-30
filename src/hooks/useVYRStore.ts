@@ -6,6 +6,8 @@ import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/li
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
 import { computeAndStoreState } from '@/lib/vyr-recompute';
+import { loadTomorrowPrediction, loadTodayAnomaly } from '@/lib/vyr-compute-client';
+import type { VYRPrediction, VYRAnomaly } from '@/lib/vyr-compute-client';
 import { bootstrapHealthSync, setupAppLifecycleListeners, setConnectionActive, isConnectionActive } from '@/lib/health-lifecycle';
 
 export interface DayEntry {
@@ -69,6 +71,10 @@ export function useVYRStore() {
   const [wearableConnection, setWearableConnection] = useState<WearableConnection | null>(null);
   const [sachetConfirmation, setSachetConfirmation] = useState<{ show: boolean; phase: string }>({ show: false, phase: 'BOOT' });
   const [userName, setUserName] = useState('');
+  // F6 — prediction, anomaly, engine mode
+  const [prediction, setPrediction] = useState<VYRPrediction | null>(null);
+  const [anomaly, setAnomaly] = useState<VYRAnomaly | null>(null);
+  const [dataDays, setDataDays] = useState(0);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -282,6 +288,20 @@ export function useVYRStore() {
       setUserName(nameRes.data.nome_publico.split(' ')[0]);
     }
 
+    // F6: Load prediction + anomaly from new tables
+    if (userId) {
+      try {
+        const [pred, anom] = await Promise.all([
+          loadTomorrowPrediction(userId),
+          loadTodayAnomaly(userId),
+        ]);
+        setPrediction(pred);
+        setAnomaly(anom);
+      } catch (e) {
+        console.warn('[store] prediction/anomaly load failed:', e);
+      }
+    }
+
     setLoading(false);
   }, [userId, today, autoConnect, refreshStateFromDB]);
 
@@ -439,6 +459,10 @@ export function useVYRStore() {
     wearableConnection,
     sachetConfirmation,
     userName,
+    prediction,
+    anomaly,
+    dataDays,
+    engineMode: dataDays < 7 ? 'bootstrap' as const : dataDays < 30 ? 'adaptive' as const : 'ml_ready' as const,
     logAction,
     logPerception,
     addCheckpoint,

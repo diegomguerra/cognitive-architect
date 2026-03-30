@@ -327,6 +327,98 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["registered": activeObserverKeys.count])
     }
 
+    // MARK: - F1b: Extended read methods (convenience wrappers)
+
+    @objc func readBodyTemperature(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "bodyTemperature")
+    }
+
+    @objc func readBloodPressure(_ call: CAPPluginCall) {
+        guard let type = HKObjectType.correlationType(forIdentifier: .bloodPressure) else {
+            call.resolve(["samples": []]); return
+        }
+        let limit = call.getInt("limit") ?? 100
+        let anchor = anchorFromString(call.getString("anchor"))
+        let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) {
+            [weak self] _, samplesOrNil, _, newAnchor, error in
+            if error != nil { call.resolve(["samples": []]); return }
+            let samples = samplesOrNil ?? []
+            var mapped: [[String: Any]] = []
+            for s in samples {
+                if let corr = s as? HKCorrelation {
+                    var data: [String: Any] = [
+                        "startDate": ISO8601DateFormatter().string(from: corr.startDate),
+                        "endDate": ISO8601DateFormatter().string(from: corr.endDate),
+                        "uuid": corr.uuid.uuidString,
+                    ]
+                    let unit = HKUnit.millimeterOfMercury()
+                    for obj in corr.objects {
+                        if let q = obj as? HKQuantitySample {
+                            if q.quantityType == HKObjectType.quantityType(forIdentifier: .bloodPressureSystolic) {
+                                data["systolic"] = q.quantity.doubleValue(for: unit)
+                            } else if q.quantityType == HKObjectType.quantityType(forIdentifier: .bloodPressureDiastolic) {
+                                data["diastolic"] = q.quantity.doubleValue(for: unit)
+                            }
+                        }
+                    }
+                    mapped.append(data)
+                }
+            }
+            call.resolve(["samples": mapped, "newAnchor": self?.anchorToString(newAnchor) as Any])
+        }
+        healthStore.execute(query)
+    }
+
+    @objc func readVO2Max(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "vo2Max")
+    }
+
+    @objc func readActiveEnergyBurned(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "activeEnergyBurned")
+    }
+
+    @objc func readBasalEnergyBurned(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "basalEnergyBurned")
+    }
+
+    @objc func readRespiratoryRate(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "respiratoryRate")
+    }
+
+    @objc func readWalkingHeartRateAverage(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "walkingHeartRateAverage")
+    }
+
+    @objc func readHeartRateRecovery(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "heartRateRecovery")
+    }
+
+    @objc func readSkinTemperature(_ call: CAPPluginCall) {
+        readAnchoredType(call, typeKey: "skinTemperature")
+    }
+
+    /// Generic anchored read helper used by extended methods above
+    private func readAnchoredType(_ call: CAPPluginCall, typeKey: String) {
+        guard let type = sampleType(for: typeKey) else {
+            call.resolve(["samples": []]); return
+        }
+        let limit = call.getInt("limit") ?? HKObjectQueryNoLimit
+        let nativeAnchorStr = defaults.string(forKey: "vyr.anchor.\(typeKey)")
+        let jsAnchorStr = call.getString("anchor")
+        let anchor = anchorFromString(nativeAnchorStr ?? jsAnchorStr)
+        let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) {
+            [weak self] _, samplesOrNil, _, newAnchor, error in
+            if error != nil { call.resolve(["samples": []]); return }
+            if let anchorStr = self?.anchorToString(newAnchor) {
+                self?.defaults.set(anchorStr, forKey: "vyr.anchor.\(typeKey)")
+            }
+            let samples = samplesOrNil ?? []
+            let mapped: [[String: Any]] = samples.compactMap { self?.serialize(sample: $0) }
+            call.resolve(["samples": mapped, "newAnchor": self?.anchorToString(newAnchor) as Any])
+        }
+        healthStore.execute(query)
+    }
+
     @objc func readAnchored(_ call: CAPPluginCall) {
         guard let key = call.getString("type"), let type = sampleType(for: key) else {
             call.reject("type is required")
