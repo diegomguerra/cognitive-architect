@@ -150,7 +150,7 @@ export async function loadTodayAnomaly(userId: string): Promise<VYRAnomaly | nul
  * Marca uma anomalia como reconhecida (usuário fechou o alerta).
  */
 export async function acknowledgeAnomaly(userId: string, day: string): Promise<void> {
-  await supabase
+  await (supabase as any)
     .from('vyr_anomalies')
     .update({ acknowledged: true })
     .eq('user_id', userId)

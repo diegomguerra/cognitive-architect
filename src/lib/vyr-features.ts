@@ -380,7 +380,7 @@ export async function computeAndStoreFeatures(
     const history = await fetchRecentHistory(uid);
     const features = computeFeatures(data, history, baseline);
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('biomarker_features')
       .upsert({
         user_id: uid,
