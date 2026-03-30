@@ -129,7 +129,7 @@ export async function loadTomorrowPrediction(userId: string): Promise<VYRPredict
 export async function loadTodayAnomaly(userId: string): Promise<VYRAnomaly | null> {
   const today = new Date().toISOString().split('T')[0];
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('vyr_anomalies')
     .select('anomaly_score, severity, features_flagged')
     .eq('user_id', userId)
