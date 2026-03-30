@@ -11,7 +11,14 @@ import BottomNav from '@/components/BottomNav';
 import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
 import { useVYRStore } from '@/hooks/useVYRStore';
-import { getCurrentPhase } from '@/lib/vyr-engine';
+// Fase activa de dose — UMA fase por janela horária
+function getActiveDosePhase(): 'BOOT' | 'HOLD' | 'CLEAR' | null {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return 'BOOT';
+  if (h >= 12 && h < 18) return 'HOLD';
+  if (h >= 18 && h < 24) return 'CLEAR';
+  return null; // 00h–04h59 — sem dose
+}
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -122,21 +129,23 @@ const Home = () => {
     return 0;
   }, [store.historyByDay]);
 
-  const handleConfirmSachet = useCallback(async () => {
+  // Confirmar sachet: registar acção
+  const handleConfirmSachet = useCallback(async (phase: string) => {
     try {
-      await store.logAction(state.phase);
+      await store.logAction(phase);
     } catch (err) {
       console.error('[home] Failed to log action:', err);
     }
-  }, [state.phase, store]);
+  }, [store]);
 
   // Limiting factor info
   const limitingPillarName = pillarNames[state.limitingFactor] || state.limitingFactor;
   const limitingValue = state.pillars[state.limitingFactor as keyof typeof state.pillars];
   const limitingLevel = limitingValue < 2.0 ? 'NÍVEL CRÍTICO' : limitingValue < 3.0 ? 'NÍVEL BAIXO' : 'NÍVEL MODERADO';
 
-  const currentPhase = getCurrentPhase();
-  const currentConfig = phaseConfig[currentPhase];
+  // Fase activa de dose (única por janela horária)
+  const activeDose = getActiveDosePhase();
+  const doseRegistered = activeDose ? actionsTaken.includes(activeDose) : false;
 
   return (
     <div className="min-h-dvh bg-background pb-24 safe-area-top" style={{ fontFamily: 'Inter, sans-serif' }}>

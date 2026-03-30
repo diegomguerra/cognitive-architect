@@ -36,11 +36,12 @@ interface ReviewEntry {
   notes: string | null;
 }
 
-const PerceptionsTab = () => {
+const PerceptionsTab = ({ initialPhase }: { initialPhase?: string | null }) => {
   const { session } = useAuth();
   const { checkpoints, perceptionsDone, getPhasePerceptionValues, logPerception, refresh } = useVYRStore();
   const [showInfo, setShowInfo] = useState(true);
-  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
+  // Se vier de Home via ?phase=BOOT, expande essa fase automaticamente
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(initialPhase || null);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(sliders.map((s) => [s.key, 5]))

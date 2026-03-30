@@ -52,7 +52,7 @@ const Labs = () => {
       {/* Tab Content */}
       <div className="px-5">
         {activeTab === 'Histórico' && <HistoryTab />}
-        {activeTab === 'Percepções' && <PerceptionsTab />}
+        {activeTab === 'Percepções' && <PerceptionsTab initialPhase={searchParams.get('phase')} />}
         {activeTab === 'Revisões' && <ReviewsTab />}
         {activeTab === 'Sinais' && <SignalsTab />}
       </div>
