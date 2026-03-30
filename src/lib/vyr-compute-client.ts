@@ -105,7 +105,7 @@ export async function loadTomorrowPrediction(userId: string): Promise<VYRPredict
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('vyr_predictions')
     .select('predicted_for_day, predicted_score, confidence, confidence_level')
     .eq('user_id', userId)
