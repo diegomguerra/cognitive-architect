@@ -398,36 +398,36 @@ const Home = () => {
             />
 
             {/* Protocol CTA */}
-            <div className="rounded-2xl p-4" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
-              <h3
-                className="text-xs uppercase mb-1"
-                style={{ fontWeight: 500, color: '#667788', letterSpacing: '0.14em' }}
-              >
-                Protocolo {currentConfig.label}
-              </h3>
-              <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>
-                {currentConfig.desc}. Registre quando tomar o sachet desta fase.
-              </p>
-            </div>
+            {activeDose && !doseRegistered && (
+              <>
+                <div className="rounded-2xl p-4" style={{ background: '#0E0E0E', border: '1px solid #1A1A1A' }}>
+                  <h3
+                    className="text-xs uppercase mb-1"
+                    style={{ fontWeight: 500, color: '#667788', letterSpacing: '0.14em' }}
+                  >
+                    Protocolo {activeDose}
+                  </h3>
+                  <p className="text-xs" style={{ fontWeight: 400, color: '#667788' }}>
+                    Registre quando tomar o sachet desta fase.
+                  </p>
+                </div>
 
-            <button
-              onClick={handleConfirmSachet}
-              className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm text-foreground transition-transform active:scale-[0.98]"
-              style={{
-                fontWeight: 500,
-                background: currentConfig.color,
-                boxShadow: `0 4px 20px -4px ${currentConfig.color}66`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <Play size={16} fill="currentColor" />
-                <span>Protocolo {currentConfig.label}</span>
-              </div>
-              <span className="text-[10px] opacity-70" style={{ fontWeight: 400 }}>{currentConfig.actionLabel}</span>
-            </button>
-            <p className="text-[10px] text-center -mt-2" style={{ fontWeight: 400, color: '#667788' }}>
-              Registre aqui quando tomar o sachet da fase {currentConfig.label}.
-            </p>
+                <button
+                  onClick={() => handleConfirmSachet(activeDose)}
+                  className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm text-foreground transition-transform active:scale-[0.98]"
+                  style={{
+                    fontWeight: 500,
+                    background: 'hsl(var(--primary))',
+                    boxShadow: '0 4px 20px -4px hsl(var(--primary) / 0.4)',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Play size={16} fill="currentColor" />
+                    <span>Registrar Sachet {activeDose}</span>
+                  </div>
+                </button>
+              </>
+            )}
           </>
         )}
       </div>
