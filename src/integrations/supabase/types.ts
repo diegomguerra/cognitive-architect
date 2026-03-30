@@ -44,6 +44,74 @@ export type Database = {
         }
         Relationships: []
       }
+      biomarker_features: {
+        Row: {
+          autonomic_balance: number | null
+          circadian_regularity: number | null
+          cognitive_readiness: number | null
+          created_at: string
+          day: string
+          engine_version: string
+          hrv_ln: number | null
+          id: string
+          load_recovery_ratio: number | null
+          quality_clareza: number | null
+          quality_energia: number | null
+          quality_estabilidade: number | null
+          recovery_quality: number | null
+          rhr_trend_3d: number | null
+          sleep_efficiency: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          autonomic_balance?: number | null
+          circadian_regularity?: number | null
+          cognitive_readiness?: number | null
+          created_at?: string
+          day: string
+          engine_version?: string
+          hrv_ln?: number | null
+          id?: string
+          load_recovery_ratio?: number | null
+          quality_clareza?: number | null
+          quality_energia?: number | null
+          quality_estabilidade?: number | null
+          recovery_quality?: number | null
+          rhr_trend_3d?: number | null
+          sleep_efficiency?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          autonomic_balance?: number | null
+          circadian_regularity?: number | null
+          cognitive_readiness?: number | null
+          created_at?: string
+          day?: string
+          engine_version?: string
+          hrv_ln?: number | null
+          id?: string
+          load_recovery_ratio?: number | null
+          quality_clareza?: number | null
+          quality_energia?: number | null
+          quality_estabilidade?: number | null
+          recovery_quality?: number | null
+          rhr_trend_3d?: number | null
+          sleep_efficiency?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "biomarker_features_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       biomarker_samples: {
         Row: {
           device_id: string | null
@@ -270,6 +338,100 @@ export type Database = {
         }
         Relationships: []
       }
+      dose_logs: {
+        Row: {
+          created_at: string
+          day: string
+          dose_type: string
+          id: string
+          notes: string | null
+          perceived_clarity: number | null
+          perceived_energy: number | null
+          perceived_feeling: number | null
+          taken_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          day?: string
+          dose_type: string
+          id?: string
+          notes?: string | null
+          perceived_clarity?: number | null
+          perceived_energy?: number | null
+          perceived_feeling?: number | null
+          taken_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          day?: string
+          dose_type?: string
+          id?: string
+          notes?: string | null
+          perceived_clarity?: number | null
+          perceived_energy?: number | null
+          perceived_feeling?: number | null
+          taken_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dose_logs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      health_data_extended: {
+        Row: {
+          created_at: string
+          data_type: string
+          id: string
+          notes: string | null
+          recorded_at: string
+          source: string | null
+          unit: string | null
+          user_id: string
+          value_json: Json | null
+          value_numeric: number | null
+        }
+        Insert: {
+          created_at?: string
+          data_type: string
+          id?: string
+          notes?: string | null
+          recorded_at: string
+          source?: string | null
+          unit?: string | null
+          user_id: string
+          value_json?: Json | null
+          value_numeric?: number | null
+        }
+        Update: {
+          created_at?: string
+          data_type?: string
+          id?: string
+          notes?: string | null
+          recorded_at?: string
+          source?: string | null
+          unit?: string | null
+          user_id?: string
+          value_json?: Json | null
+          value_numeric?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "health_data_extended_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       notification_preferences: {
         Row: {
           created_at: string
@@ -348,6 +510,7 @@ export type Database = {
           consumo_cafeina: string | null
           created_at: string
           data_nascimento: string
+          email: string | null
           frequencia_exercicio: string | null
           horario_acordar: string | null
           horario_dormir: string | null
@@ -356,6 +519,7 @@ export type Database = {
           medicamentos_uso: string | null
           nivel_estresse_geral: number | null
           nivel_experiencia_suplementos: string | null
+          nome: string | null
           nome_publico: string
           objetivo_principal: string | null
           onboarding_completo: boolean | null
@@ -379,6 +543,7 @@ export type Database = {
           consumo_cafeina?: string | null
           created_at?: string
           data_nascimento: string
+          email?: string | null
           frequencia_exercicio?: string | null
           horario_acordar?: string | null
           horario_dormir?: string | null
@@ -387,6 +552,7 @@ export type Database = {
           medicamentos_uso?: string | null
           nivel_estresse_geral?: number | null
           nivel_experiencia_suplementos?: string | null
+          nome?: string | null
           nome_publico: string
           objetivo_principal?: string | null
           onboarding_completo?: boolean | null
@@ -412,6 +578,7 @@ export type Database = {
           consumo_cafeina?: string | null
           created_at?: string
           data_nascimento?: string
+          email?: string | null
           frequencia_exercicio?: string | null
           horario_acordar?: string | null
           horario_dormir?: string | null
@@ -420,6 +587,7 @@ export type Database = {
           medicamentos_uso?: string | null
           nivel_estresse_geral?: number | null
           nivel_experiencia_suplementos?: string | null
+          nome?: string | null
           nome_publico?: string
           objetivo_principal?: string | null
           onboarding_completo?: boolean | null
@@ -704,7 +872,9 @@ export type Database = {
       user_integrations: {
         Row: {
           access_token: string | null
+          config: Json
           created_at: string
+          enabled: boolean
           external_user_id: string | null
           id: string
           last_error: string | null
@@ -720,7 +890,9 @@ export type Database = {
         }
         Insert: {
           access_token?: string | null
+          config?: Json
           created_at?: string
+          enabled?: boolean
           external_user_id?: string | null
           id?: string
           last_error?: string | null
@@ -736,7 +908,9 @@ export type Database = {
         }
         Update: {
           access_token?: string | null
+          config?: Json
           created_at?: string
+          enabled?: boolean
           external_user_id?: string | null
           id?: string
           last_error?: string | null
@@ -783,6 +957,171 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      vyr_anomalies: {
+        Row: {
+          acknowledged: boolean
+          anomaly_score: number
+          created_at: string
+          day: string
+          features_flagged: Json
+          id: string
+          message: string | null
+          severity: string
+          threshold_used: number | null
+          user_id: string
+        }
+        Insert: {
+          acknowledged?: boolean
+          anomaly_score: number
+          created_at?: string
+          day: string
+          features_flagged?: Json
+          id?: string
+          message?: string | null
+          severity: string
+          threshold_used?: number | null
+          user_id: string
+        }
+        Update: {
+          acknowledged?: boolean
+          anomaly_score?: number
+          created_at?: string
+          day?: string
+          features_flagged?: Json
+          id?: string
+          message?: string | null
+          severity?: string
+          threshold_used?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vyr_anomalies_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      vyr_model_weights: {
+        Row: {
+          active: boolean
+          created_at: string
+          feature_importance: Json | null
+          id: string
+          mae: number | null
+          mode: string
+          model_artifact: Json | null
+          platform: string
+          r2_score: number | null
+          rmse: number | null
+          shap_summary: Json | null
+          trained_at: string | null
+          training_days: number | null
+          updated_at: string
+          user_id: string | null
+          version: number
+          weights: Json
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          feature_importance?: Json | null
+          id?: string
+          mae?: number | null
+          mode?: string
+          model_artifact?: Json | null
+          platform: string
+          r2_score?: number | null
+          rmse?: number | null
+          shap_summary?: Json | null
+          trained_at?: string | null
+          training_days?: number | null
+          updated_at?: string
+          user_id?: string | null
+          version?: number
+          weights?: Json
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          feature_importance?: Json | null
+          id?: string
+          mae?: number | null
+          mode?: string
+          model_artifact?: Json | null
+          platform?: string
+          r2_score?: number | null
+          rmse?: number | null
+          shap_summary?: Json | null
+          trained_at?: string | null
+          training_days?: number | null
+          updated_at?: string
+          user_id?: string | null
+          version?: number
+          weights?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vyr_model_weights_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      vyr_predictions: {
+        Row: {
+          confidence: number | null
+          confidence_level: string | null
+          created_at: string
+          features_used: Json | null
+          id: string
+          model_mode: string | null
+          model_version: number | null
+          predicted_for_day: string
+          predicted_pillars: Json
+          predicted_score: number | null
+          user_id: string
+        }
+        Insert: {
+          confidence?: number | null
+          confidence_level?: string | null
+          created_at?: string
+          features_used?: Json | null
+          id?: string
+          model_mode?: string | null
+          model_version?: number | null
+          predicted_for_day: string
+          predicted_pillars?: Json
+          predicted_score?: number | null
+          user_id: string
+        }
+        Update: {
+          confidence?: number | null
+          confidence_level?: string | null
+          created_at?: string
+          features_used?: Json | null
+          id?: string
+          model_mode?: string | null
+          model_version?: number | null
+          predicted_for_day?: string
+          predicted_pillars?: Json
+          predicted_score?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vyr_predictions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "admin_users"
+            referencedColumns: ["user_id"]
+          },
+        ]
       }
       webhook_logs: {
         Row: {
