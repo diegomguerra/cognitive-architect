@@ -187,7 +187,9 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
     let bridgeOk = false;
     try {
       const bridgeResult = await VYRHealthBridge.requestAuthorization({
-        readTypes: ['restingHeartRate', 'heartRateVariability', 'oxygenSaturation'],
+        readTypes: [...BRIDGE_READ_TYPES] as string[],
+        writeTypes: [...BRIDGE_ONLY_WRITE_TYPES] as string[],
+      });
         writeTypes: ['bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic'],
       });
       bridgeOk = bridgeResult?.granted ?? false;

@@ -58,6 +58,23 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             return HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
         case "restingHeartRate":
             return HKObjectType.quantityType(forIdentifier: .restingHeartRate)
+        // F1b — novos tipos
+        case "respiratoryRate":
+            return HKObjectType.quantityType(forIdentifier: .respiratoryRate)
+        case "basalEnergyBurned":
+            return HKObjectType.quantityType(forIdentifier: .basalEnergyBurned)
+        case "walkingHeartRateAverage":
+            return HKObjectType.quantityType(forIdentifier: .walkingHeartRateAverage)
+        case "heartRateRecovery":
+            if #available(iOS 16.0, *) {
+                return HKObjectType.quantityType(forIdentifier: .heartRateRecoveryOneMinute)
+            }
+            return nil
+        case "skinTemperature":
+            if #available(iOS 17.0, *) {
+                return HKObjectType.quantityType(forIdentifier: .appleSleepingWristTemperature)
+            }
+            return nil
         default:
             return nil
         }
@@ -527,6 +544,12 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
             return sample.quantity.doubleValue(for: HKUnit.kilocalorie())
         case HKQuantityType.quantityType(forIdentifier: .stepCount):
             return sample.quantity.doubleValue(for: HKUnit.count())
+        case HKQuantityType.quantityType(forIdentifier: .respiratoryRate):
+            return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
+        case HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned):
+            return sample.quantity.doubleValue(for: HKUnit.kilocalorie())
+        case HKQuantityType.quantityType(forIdentifier: .walkingHeartRateAverage):
+            return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
         default:
             return sample.quantity.doubleValue(for: HKUnit.count())
         }
