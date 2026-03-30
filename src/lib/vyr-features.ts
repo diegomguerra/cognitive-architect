@@ -223,7 +223,7 @@ export function computeFeatures(
   // ── Feature 05: autonomic_balance ────────────────────────────────────────
   // (hrv_ln_z - rhr_z + resp_z_inv) / 3 — índice composto SNA
   let autonomic_balance: number | null = null;
-  const blHrv = baseline.hrvLn;
+  const blHrv = baseline.hrv;
   const blRhr = baseline.rhr;
   let componentCount = 0;
   let abSum = 0;
@@ -380,7 +380,7 @@ export async function computeAndStoreFeatures(
     const history = await fetchRecentHistory(uid);
     const features = computeFeatures(data, history, baseline);
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('biomarker_features')
       .upsert({
         user_id: uid,

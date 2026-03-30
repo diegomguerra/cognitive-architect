@@ -105,7 +105,7 @@ export async function loadTomorrowPrediction(userId: string): Promise<VYRPredict
   tomorrow.setDate(tomorrow.getDate() + 1);
   const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('vyr_predictions')
     .select('predicted_for_day, predicted_score, confidence, confidence_level')
     .eq('user_id', userId)
@@ -129,7 +129,7 @@ export async function loadTomorrowPrediction(userId: string): Promise<VYRPredict
 export async function loadTodayAnomaly(userId: string): Promise<VYRAnomaly | null> {
   const today = new Date().toISOString().split('T')[0];
 
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from('vyr_anomalies')
     .select('anomaly_score, severity, features_flagged')
     .eq('user_id', userId)
@@ -150,7 +150,7 @@ export async function loadTodayAnomaly(userId: string): Promise<VYRAnomaly | nul
  * Marca uma anomalia como reconhecida (usuário fechou o alerta).
  */
 export async function acknowledgeAnomaly(userId: string, day: string): Promise<void> {
-  await supabase
+  await (supabase as any)
     .from('vyr_anomalies')
     .update({ acknowledged: true })
     .eq('user_id', userId)
