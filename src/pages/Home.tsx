@@ -417,14 +417,17 @@ const Home = () => {
                   className="w-full rounded-xl py-4 flex flex-col items-center gap-1 text-sm text-foreground transition-transform active:scale-[0.98]"
                   style={{
                     fontWeight: 500,
-                    background: 'hsl(var(--primary))',
-                    boxShadow: '0 4px 20px -4px hsl(var(--primary) / 0.4)',
+                    background: phaseConfig[activeDose]?.color ?? 'hsl(var(--primary))',
+                    boxShadow: `0 4px 20px -4px ${phaseConfig[activeDose]?.color ?? 'hsl(var(--primary))'}66`,
                   }}
                 >
                   <div className="flex items-center gap-2">
                     <Play size={16} fill="currentColor" />
-                    <span>Registrar Sachet {activeDose}</span>
+                    <span>Protocolo {activeDose}</span>
                   </div>
+                  <span className="text-[10px] opacity-70">
+                    {phaseConfig[activeDose]?.actionLabel ?? 'Clique ao tomar ' + activeDose}
+                  </span>
                 </button>
               </>
             )}
@@ -440,7 +443,7 @@ const Home = () => {
           onDismiss={store.dismissConfirmation}
           onAddObservation={() => {
             store.dismissConfirmation();
-            setShowCheckpoint(true);
+            navigate('/labs?tab=Perce%C3%A7%C3%B5es&phase=' + sachetConfirmation.phase);
           }}
         />
       )}
