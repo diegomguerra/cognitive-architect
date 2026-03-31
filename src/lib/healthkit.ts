@@ -460,31 +460,25 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     spo2: spo2Bridge.samples.length,
   });
 
-  // If HRV or SpO2 came back empty, the anchor may be stale — reset and retry once
+  // If HRV or SpO2 came back empty, fallback to direct date query (no anchor dependency)
   if (hrvBridge.samples.length === 0 || spo2Bridge.samples.length === 0) {
-    const staleTypes: string[] = [];
-    if (hrvBridge.samples.length === 0) staleTypes.push('heartRateVariability');
-    if (spo2Bridge.samples.length === 0) staleTypes.push('oxygenSaturation');
-    console.warn('[healthkit] empty HRV/SpO2 — resetting anchors for', staleTypes);
+    console.warn('[healthkit] empty HRV/SpO2 after anchored read — falling back to readByDate');
     try {
-      await VYRHealthBridge.resetAnchors({ types: staleTypes });
-      const [hrvRetry, spo2Retry] = await Promise.all([
-        staleTypes.includes('heartRateVariability')
-          ? VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge)
+      const startDate = yesterday.toISOString();
+      const endDate = now.toISOString();
+      const [hrvFallback, spo2Fallback] = await Promise.all([
+        hrvBridge.samples.length === 0
+          ? VYRHealthBridge.readByDate({ type: 'heartRateVariability', startDate, endDate, limit: 500 }).catch(() => emptyBridge)
           : Promise.resolve(hrvBridge),
-        staleTypes.includes('oxygenSaturation')
-          ? VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge)
+        spo2Bridge.samples.length === 0
+          ? VYRHealthBridge.readByDate({ type: 'oxygenSaturation', startDate, endDate, limit: 500 }).catch(() => emptyBridge)
           : Promise.resolve(spo2Bridge),
       ]);
-      if (staleTypes.includes('heartRateVariability')) {
-        hrvBridge = { ...hrvRetry, samples: filterByTime(hrvRetry.samples) };
-      }
-      if (staleTypes.includes('oxygenSaturation')) {
-        spo2Bridge = { ...spo2Retry, samples: filterByTime(spo2Retry.samples) };
-      }
-      console.info('[healthkit] retry after anchor reset — hrv:', hrvBridge.samples.length, 'spo2:', spo2Bridge.samples.length);
+      if (hrvBridge.samples.length === 0) hrvBridge = hrvFallback;
+      if (spo2Bridge.samples.length === 0) spo2Bridge = spo2Fallback;
+      console.info('[healthkit] readByDate fallback — hrv:', hrvBridge.samples.length, 'spo2:', spo2Bridge.samples.length);
     } catch (e) {
-      console.warn('[healthkit] anchor reset retry failed:', e);
+      console.warn('[healthkit] readByDate fallback failed:', e);
     }
   }
 
