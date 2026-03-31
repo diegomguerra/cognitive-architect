@@ -190,8 +190,6 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
         readTypes: [...BRIDGE_READ_TYPES] as string[],
         writeTypes: [...BRIDGE_ONLY_WRITE_TYPES] as string[],
       });
-        writeTypes: ['bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic'],
-      });
       bridgeOk = bridgeResult?.granted ?? false;
     } catch (bridgeErr: any) {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
