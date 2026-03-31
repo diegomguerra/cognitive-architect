@@ -445,10 +445,9 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
 
         let limit = call.getInt("limit") ?? HKObjectQueryNoLimit
-        // FIX P1: prefer anchor from UserDefaults, fallback to JS-provided anchor
-        let nativeAnchorStr = defaults.string(forKey: "vyr.anchor.\(key)")
-        let jsAnchorStr = call.getString("anchor")
-        let anchor = anchorFromString(nativeAnchorStr ?? jsAnchorStr)
+        // Use only the JS-provided anchor so callers control full-read vs incremental-read.
+        // The anchor is still auto-saved to UserDefaults after each read (belt-and-suspenders).
+        let anchor = anchorFromString(call.getString("anchor"))
 
         let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) { [weak self] _, samplesOrNil, _, newAnchor, error in
             if let error {
