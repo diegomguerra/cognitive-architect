@@ -115,6 +115,19 @@
     padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
   }
 
+  /* Cobre a safe area do iPhone abaixo da BottomNav */
+  .safe-area-bottom::after {
+    content: '';
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-bottom, 0px);
+    background: hsl(var(--vyr-bg-primary));
+    z-index: 19;
+    pointer-events: none;
+  }
+
   .animate-delta-pulse {
     animation: delta-pulse 2s ease-in-out infinite;
   }
