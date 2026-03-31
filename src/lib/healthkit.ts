@@ -190,8 +190,6 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
         readTypes: [...BRIDGE_READ_TYPES] as string[],
         writeTypes: [...BRIDGE_ONLY_WRITE_TYPES] as string[],
       });
-        writeTypes: ['bodyTemperature', 'vo2Max', 'activeEnergyBurned', 'bloodPressureSystolic', 'bloodPressureDiastolic'],
-      });
       bridgeOk = bridgeResult?.granted ?? false;
     } catch (bridgeErr: any) {
       console.warn('[healthkit] bridge requestAuthorization failed:', bridgeErr?.code || bridgeErr);
@@ -416,7 +414,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const empty = { samples: [] as HealthSample[] };
   const emptyBridge = { samples: [] as Array<Record<string, unknown>> };
 
-  const [
+  let [
     sleepData, stepsData, hrData,
     rhrBridge, hrvBridge, spo2Bridge, rrBridge,
     vo2MaxBridge, skinTempBridge,
@@ -461,6 +459,34 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hrv: hrvBridge.samples.length,
     spo2: spo2Bridge.samples.length,
   });
+
+  // If HRV or SpO2 came back empty, the anchor may be stale — reset and retry once
+  if (hrvBridge.samples.length === 0 || spo2Bridge.samples.length === 0) {
+    const staleTypes: string[] = [];
+    if (hrvBridge.samples.length === 0) staleTypes.push('heartRateVariability');
+    if (spo2Bridge.samples.length === 0) staleTypes.push('oxygenSaturation');
+    console.warn('[healthkit] empty HRV/SpO2 — resetting anchors for', staleTypes);
+    try {
+      await VYRHealthBridge.resetAnchors({ types: staleTypes });
+      const [hrvRetry, spo2Retry] = await Promise.all([
+        staleTypes.includes('heartRateVariability')
+          ? VYRHealthBridge.readAnchored({ type: 'heartRateVariability', limit: 500 }).catch(() => emptyBridge)
+          : Promise.resolve(hrvBridge),
+        staleTypes.includes('oxygenSaturation')
+          ? VYRHealthBridge.readAnchored({ type: 'oxygenSaturation', limit: 500 }).catch(() => emptyBridge)
+          : Promise.resolve(spo2Bridge),
+      ]);
+      if (staleTypes.includes('heartRateVariability')) {
+        hrvBridge = { ...hrvRetry, samples: filterByTime(hrvRetry.samples) };
+      }
+      if (staleTypes.includes('oxygenSaturation')) {
+        spo2Bridge = { ...spo2Retry, samples: filterByTime(spo2Retry.samples) };
+      }
+      console.info('[healthkit] retry after anchor reset — hrv:', hrvBridge.samples.length, 'spo2:', spo2Bridge.samples.length);
+    } catch (e) {
+      console.warn('[healthkit] anchor reset retry failed:', e);
+    }
+  }
 
   const rawRows = buildSampleRows(
     userId,
@@ -555,9 +581,33 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hr_recovery_1min: avgHrRecovery1Min ? Math.round(avgHrRecovery1Min * 10) / 10 : null,
   };
 
+  // Merge with existing metrics so we don't overwrite non-null values with null
+  let mergedMetrics = metrics;
+  try {
+    const { data: existing } = await supabase
+      .from('ring_daily_data')
+      .select('metrics')
+      .eq('user_id', userId)
+      .eq('day', today)
+      .maybeSingle();
+    if (existing?.metrics && typeof existing.metrics === 'object') {
+      const prev = existing.metrics as Record<string, unknown>;
+      const merged = { ...prev } as Record<string, unknown>;
+      for (const [k, v] of Object.entries(metrics)) {
+        // Only overwrite if we have a real value, or if prev was also null
+        if (v != null || prev[k] == null) {
+          merged[k] = v;
+        }
+      }
+      mergedMetrics = merged as typeof metrics;
+    }
+  } catch (e) {
+    console.warn('[healthkit] merge read failed, using new metrics only:', e);
+  }
+
   const result = await retryOnAuthErrorLabeled(async () => {
     const res = await supabase.from('ring_daily_data').upsert(
-      [{ user_id: userId, day: today, source_provider: 'apple_health', metrics: metrics as unknown as Json }],
+      [{ user_id: userId, day: today, source_provider: 'apple_health', metrics: mergedMetrics as unknown as Json }],
       { onConflict: 'user_id,day,source_provider' }
     ).select();
     return { data: res.data, error: res.error ? { code: (res.error as any).code, message: res.error.message } : null };

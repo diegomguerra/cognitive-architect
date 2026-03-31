@@ -22,6 +22,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "loadAnchor", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveConnectionState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "loadConnectionState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resetAnchors", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -468,6 +469,27 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         }
 
         healthStore.execute(query)
+    }
+
+    /// Reset anchors for specified types (or all if none given), forcing a full re-read
+    @objc func resetAnchors(_ call: CAPPluginCall) {
+        let types = call.getArray("types", String.self) ?? [
+            "heartRateVariability", "oxygenSaturation", "restingHeartRate",
+            "respiratoryRate", "vo2Max", "skinTemperature",
+            "activeEnergyBurned", "basalEnergyBurned",
+            "walkingHeartRateAverage", "heartRateRecovery",
+        ]
+        var cleared: [String] = []
+        for key in types {
+            let udKey = "vyr.anchor.\(key)"
+            if defaults.string(forKey: udKey) != nil {
+                defaults.removeObject(forKey: udKey)
+                cleared.append(key)
+            }
+        }
+        defaults.synchronize()
+        NSLog("[VYRHealthBridge] resetAnchors cleared: \(cleared)")
+        call.resolve(["cleared": cleared])
     }
 
     private func serialize(sample: HKSample) -> [String: Any]? {

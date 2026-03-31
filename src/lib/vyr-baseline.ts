@@ -13,6 +13,7 @@ export interface BaselineMetrics {
 interface MetricsData {
   rhr?: number | null;
   hrv_sdnn?: number | null;
+  hrv_index?: number | null;
   sleep_duration_hours?: number | null;
   sleep_quality?: number | null;
   spo2?: number | null;
@@ -83,7 +84,8 @@ export async function calculateBaseline(knownUserId?: string): Promise<BaselineM
   }
 
   const rhrVals = metrics.map((m) => m.rhr).filter((v): v is number => v != null);
-  const hrvVals = metrics.map((m) => m.hrv_sdnn).filter((v): v is number => v != null);
+  // FIX: use hrv_index (0-100 scale) for baseline — matches vyr-engine which z-scores hrvIndex
+  const hrvVals = metrics.map((m) => m.hrv_index ?? null).filter((v): v is number => v != null);
   const sleepDurVals = metrics.map((m) => m.sleep_duration_hours).filter((v): v is number => v != null);
   const sleepQualVals = metrics.map((m) => m.sleep_quality).filter((v): v is number => v != null);
   const spo2Vals = metrics.map((m) => m.spo2).filter((v): v is number => v != null);
@@ -106,10 +108,10 @@ async function getPopulationBaseline(): Promise<BaselineMetrics> {
     .select('metrica, faixa_min, faixa_max');
 
   if (!refs || refs.length === 0) {
-    // Hardcoded fallback
+    // Hardcoded fallback — HRV on 0-100 index scale (not raw ms)
     return {
       rhr: { mean: 65, std: 10 },
-      hrv: { mean: 40, std: 15 },
+      hrv: { mean: 55, std: 12 },
       sleepDuration: { mean: 7, std: 1 },
       sleepQuality: { mean: 60, std: 15 },
       spo2: { mean: 97, std: 1.5 },
@@ -130,7 +132,7 @@ async function getPopulationBaseline(): Promise<BaselineMetrics> {
 
   return {
     rhr: find('rhr', 'rhr') || { mean: 65, std: 10 },
-    hrv: find('hrv_sdnn', 'hrv') || { mean: 40, std: 15 },
+    hrv: find('hrv_index', 'hrv') || { mean: 55, std: 12 },
     sleepDuration: find('sleep_duration', 'sleepDuration') || { mean: 7, std: 1 },
     sleepQuality: find('sleep_quality', 'sleepQuality') || { mean: 60, std: 15 },
     spo2: find('spo2', 'spo2') || { mean: 97, std: 1.5 },
