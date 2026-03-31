@@ -22,6 +22,8 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "loadAnchor", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveConnectionState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "loadConnectionState", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "resetAnchors", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "readByDate", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -465,6 +467,66 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
                 "samples": mapped,
                 "newAnchor": self?.anchorToString(newAnchor) as Any,
             ])
+        }
+
+        healthStore.execute(query)
+    }
+
+    /// Reset anchors for specified types (or all if none given), forcing a full re-read
+    @objc func resetAnchors(_ call: CAPPluginCall) {
+        let types = call.getArray("types", String.self) ?? [
+            "heartRateVariability", "oxygenSaturation", "restingHeartRate",
+            "respiratoryRate", "vo2Max", "skinTemperature",
+            "activeEnergyBurned", "basalEnergyBurned",
+            "walkingHeartRateAverage", "heartRateRecovery",
+        ]
+        var cleared: [String] = []
+        for key in types {
+            let udKey = "vyr.anchor.\(key)"
+            if defaults.string(forKey: udKey) != nil {
+                defaults.removeObject(forKey: udKey)
+                cleared.append(key)
+            }
+        }
+        defaults.synchronize()
+        NSLog("[VYRHealthBridge] resetAnchors cleared: \(cleared)")
+        call.resolve(["cleared": cleared])
+    }
+
+    /// Direct date-range query (no anchor) — guaranteed to return data if it exists in HealthKit
+    @objc func readByDate(_ call: CAPPluginCall) {
+        guard let key = call.getString("type"), let type = sampleType(for: key) else {
+            call.reject("type is required")
+            return
+        }
+
+        guard let startDateStr = call.getString("startDate"),
+              let startDate = ISO8601DateFormatter().date(from: startDateStr) else {
+            call.reject("startDate is required (ISO8601)")
+            return
+        }
+
+        let endDate: Date
+        if let endDateStr = call.getString("endDate"),
+           let parsed = ISO8601DateFormatter().date(from: endDateStr) {
+            endDate = parsed
+        } else {
+            endDate = Date()
+        }
+
+        let limit = call.getInt("limit") ?? 500
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sortDesc = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: limit, sortDescriptors: [sortDesc]) { [weak self] _, samplesOrNil, error in
+            if let error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            let samples = samplesOrNil ?? []
+            let mapped: [[String: Any]] = samples.compactMap { self?.serialize(sample: $0) }
+            NSLog("[VYRHealthBridge] readByDate(\(key)) returned \(mapped.count) samples")
+            call.resolve(["samples": mapped])
         }
 
         healthStore.execute(query)

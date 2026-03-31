@@ -29,6 +29,8 @@ export interface VYRHealthBridgePlugin {
   // FIX P1: Native persistence — anchors and connection state stored in UserDefaults,
   // not localStorage. Survives app reinstall, TestFlight public link installs, and
   // WKWebView container resets.
+  resetAnchors(options?: { types?: string[] }): Promise<{ cleared: string[] }>;
+  readByDate(options: { type: string; startDate: string; endDate?: string; limit?: number }): Promise<{ samples: Array<Record<string, unknown>> }>;
   saveAnchor(options: { key: string; value: string }): Promise<{ saved: boolean }>;
   loadAnchor(options: { key: string }): Promise<{ value: string | null }>;
   saveConnectionState(options: { active: boolean; lastSync?: string }): Promise<{ saved: boolean }>;
