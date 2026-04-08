@@ -8,7 +8,7 @@ import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPe
 import { computeAndStoreState } from '@/lib/vyr-recompute';
 import { loadTomorrowPrediction, loadTodayAnomaly } from '@/lib/vyr-compute-client';
 import type { VYRPrediction, VYRAnomaly } from '@/lib/vyr-compute-client';
-import { bootstrapHealthSync, setupAppLifecycleListeners, setConnectionActive, isConnectionActive } from '@/lib/health-lifecycle';
+import { bootstrapHealthSync, setupAppLifecycleListeners, setConnectionActive, isConnectionActive, startSyncCommandListener, stopSyncCommandListener } from '@/lib/health-lifecycle';
 
 export interface DayEntry {
   day: string;
@@ -312,7 +312,14 @@ export function useVYRStore() {
       // On sync complete after resume, reload data to refresh UI
       loadData();
     });
-  }, [loadData]);
+    // Start listening for admin-triggered sync commands via Realtime
+    if (userId) {
+      startSyncCommandListener(userId);
+    }
+    return () => {
+      stopSyncCommandListener();
+    };
+  }, [loadData, userId]);
 
   // Actions
   const logAction = useCallback(async (phase: string, payload?: object) => {

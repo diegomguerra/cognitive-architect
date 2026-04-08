@@ -10,8 +10,10 @@
  */
 
 import { VYRHealthBridge } from './healthkit-bridge';
-import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync } from './healthkit';
+import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync, syncHealthKitData } from './healthkit';
 import { computeAndStoreState } from './vyr-recompute';
+import { supabase } from '@/integrations/supabase/client';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 const LS_LAST_SYNC_KEY = 'vyr.health.lastAutoSync';
@@ -19,6 +21,7 @@ const LS_ACTIVE_KEY = 'vyr.health.connectionActive';
 
 let lifecycleListenersBound = false;
 let bootstrapInProgress = false;
+let syncCommandChannel: RealtimeChannel | null = null;
 
 const isNativePlatform = (): boolean =>
   !!(window as any).Capacitor?.isNativePlatform?.();
@@ -154,4 +157,107 @@ export async function setConnectionActive(active: boolean): Promise<void> {
 export async function isConnectionActive(): Promise<boolean> {
   const { active } = await loadNativeConnectionState();
   return active;
+}
+
+/**
+ * Handle a remote sync command from the admin dashboard.
+ * Triggers a full sync and updates the command status in Supabase.
+ */
+async function handleSyncCommand(commandId: string, command: string): Promise<void> {
+  console.info('[health-lifecycle] Received remote sync command:', command, '(id:', commandId, ')');
+
+  // Mark as received
+  await supabase
+    .from('sync_commands')
+    .update({ status: 'received', updated_at: new Date().toISOString() })
+    .eq('id', commandId);
+
+  try {
+    const ok = await syncHealthKitData();
+
+    await supabase
+      .from('sync_commands')
+      .update({
+        status: ok ? 'completed' : 'failed',
+        updated_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        result: ok
+          ? { synced_at: new Date().toISOString(), source: 'apple_health' }
+          : { error: 'syncHealthKitData returned false' },
+      })
+      .eq('id', commandId);
+
+    console.info('[health-lifecycle] Remote sync', ok ? 'completed' : 'failed');
+  } catch (e: any) {
+    console.error('[health-lifecycle] Remote sync error:', e);
+    await supabase
+      .from('sync_commands')
+      .update({
+        status: 'failed',
+        updated_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        result: { error: e?.message || 'Unknown error' },
+      })
+      .eq('id', commandId);
+  }
+}
+
+/**
+ * Subscribe to sync_commands via Supabase Realtime for admin-triggered syncs.
+ * Also checks for any pending commands on startup.
+ */
+export function startSyncCommandListener(userId: string): void {
+  // Clean up previous channel
+  stopSyncCommandListener();
+
+  syncCommandChannel = supabase
+    .channel(`sync-commands-${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'sync_commands',
+        filter: `user_id=eq.${userId}`,
+      },
+      (payload: any) => {
+        const record = payload.new;
+        if (record && (record.status === 'pending' || record.status === 'sent')) {
+          void handleSyncCommand(record.id, record.command);
+        }
+      }
+    )
+    .subscribe((status: string) => {
+      console.info('[health-lifecycle] sync_commands realtime:', status);
+    });
+
+  // Check for pending commands on startup
+  void (async () => {
+    try {
+      const { data: pending } = await supabase
+        .from('sync_commands')
+        .select('id, command')
+        .eq('user_id', userId)
+        .in('status', ['pending', 'sent'])
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (pending && pending.length > 0) {
+        console.info('[health-lifecycle] Found pending sync command on mount:', pending[0].id);
+        void handleSyncCommand(pending[0].id, pending[0].command);
+      }
+    } catch (e) {
+      console.warn('[health-lifecycle] Failed to check pending sync commands:', e);
+    }
+  })();
+}
+
+/**
+ * Unsubscribe from sync_commands Realtime channel.
+ */
+export function stopSyncCommandListener(): void {
+  if (syncCommandChannel) {
+    supabase.removeChannel(syncCommandChannel);
+    syncCommandChannel = null;
+  }
 }
