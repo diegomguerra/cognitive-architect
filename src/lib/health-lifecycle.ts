@@ -12,6 +12,7 @@
 import { VYRHealthBridge } from './healthkit-bridge';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync, syncHealthKitData } from './healthkit';
 import { computeAndStoreState } from './vyr-recompute';
+import { registerPushToken, setupPushSyncHandler, unregisterPushToken } from './push-sync';
 import { supabase } from '@/integrations/supabase/client';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -94,6 +95,14 @@ export async function bootstrapHealthSync(): Promise<boolean> {
     // FIX P5 (via native side): registerObserverQueries is idempotent — safe to call on resume
     await enableHealthKitBackgroundSync();
 
+    // Register push token for background sync via admin dashboard
+    const session = await supabase.auth.getSession();
+    const uid = session.data?.session?.user?.id;
+    if (uid) {
+      await registerPushToken(uid);
+      setupPushSyncHandler();
+    }
+
     if (await shouldAutoSync()) {
       console.info('[health-lifecycle] Auto-sync triggered');
       const ok = await runIncrementalHealthSync('manual');
@@ -145,9 +154,17 @@ export function setupAppLifecycleListeners(onSyncComplete?: () => void): void {
 
 /**
  * Mark the health connection as active. Persists to UserDefaults (native) + localStorage.
+ * On deactivation, also deactivates push token.
  */
 export async function setConnectionActive(active: boolean): Promise<void> {
   await saveNativeConnectionState(active, active ? undefined : undefined);
+  if (!active) {
+    const session = await supabase.auth.getSession();
+    const uid = session.data?.session?.user?.id;
+    if (uid) {
+      await unregisterPushToken(uid);
+    }
+  }
 }
 
 /**
