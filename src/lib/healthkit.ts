@@ -436,47 +436,48 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     VYRHealthBridge.readAnchored({ type: 'heartRateRecovery', limit: 100 }).catch(() => emptyBridge),
   ]);
 
-  const cutoff = yesterday.toISOString();
-  const filterByTime = (samples: Array<Record<string, unknown>>) =>
-    samples.filter(s => String(s.startDate || '') >= cutoff);
-
-  rhrBridge.samples     = filterByTime(rhrBridge.samples);
-  hrvBridge.samples     = filterByTime(hrvBridge.samples);
-  spo2Bridge.samples    = filterByTime(spo2Bridge.samples);
-  rrBridge.samples      = filterByTime(rrBridge.samples);
-  vo2MaxBridge.samples  = filterByTime(vo2MaxBridge.samples);
-  skinTempBridge.samples       = filterByTime(skinTempBridge.samples);
-  activeEnergyBridge.samples   = filterByTime(activeEnergyBridge.samples);
-  basalEnergyBridge.samples    = filterByTime(basalEnergyBridge.samples);
-  walkingHrBridge.samples      = filterByTime(walkingHrBridge.samples);
-  hrRecoveryBridge.samples     = filterByTime(hrRecoveryBridge.samples);
-
-  console.info('[healthkit] sync samples count', {
+  console.info('[healthkit] sync samples count (anchored)', {
     sleep: sleepData.samples.length,
     steps: stepsData.samples.length,
     hr: hrData.samples.length,
     rhr: rhrBridge.samples.length,
     hrv: hrvBridge.samples.length,
     spo2: spo2Bridge.samples.length,
+    rr: rrBridge.samples.length,
   });
 
-  // If HRV or SpO2 came back empty, fallback to direct date query (no anchor dependency)
-  if (hrvBridge.samples.length === 0 || spo2Bridge.samples.length === 0) {
-    console.warn('[healthkit] empty HRV/SpO2 after anchored read — falling back to readByDate');
+  // Apple Watch writes HRV/RHR/SpO2 once per night. If the anchored read
+  // returned nothing, fall back to a 30-day window so a fresh install or a
+  // consumed anchor doesn't permanently lose historical samples. The DB
+  // unique constraint dedupes — safe to over-fetch.
+  const fallback30dStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const fallbackEnd = now.toISOString();
+  const needFallback =
+    hrvBridge.samples.length === 0 ||
+    rhrBridge.samples.length === 0 ||
+    spo2Bridge.samples.length === 0;
+  if (needFallback) {
+    console.warn('[healthkit] empty HRV/RHR/SpO2 after anchored read — falling back to readByDate (30d)');
     try {
-      const startDate = yesterday.toISOString();
-      const endDate = now.toISOString();
-      const [hrvFallback, spo2Fallback] = await Promise.all([
+      const [hrvFb, rhrFb, spo2Fb] = await Promise.all([
         hrvBridge.samples.length === 0
-          ? VYRHealthBridge.readByDate({ type: 'heartRateVariability', startDate, endDate, limit: 500 }).catch(() => emptyBridge)
+          ? VYRHealthBridge.readByDate({ type: 'heartRateVariability', startDate: fallback30dStart, endDate: fallbackEnd, limit: 2000 }).catch(() => emptyBridge)
           : Promise.resolve(hrvBridge),
+        rhrBridge.samples.length === 0
+          ? VYRHealthBridge.readByDate({ type: 'restingHeartRate', startDate: fallback30dStart, endDate: fallbackEnd, limit: 2000 }).catch(() => emptyBridge)
+          : Promise.resolve(rhrBridge),
         spo2Bridge.samples.length === 0
-          ? VYRHealthBridge.readByDate({ type: 'oxygenSaturation', startDate, endDate, limit: 500 }).catch(() => emptyBridge)
+          ? VYRHealthBridge.readByDate({ type: 'oxygenSaturation', startDate: fallback30dStart, endDate: fallbackEnd, limit: 2000 }).catch(() => emptyBridge)
           : Promise.resolve(spo2Bridge),
       ]);
-      if (hrvBridge.samples.length === 0) hrvBridge = hrvFallback;
-      if (spo2Bridge.samples.length === 0) spo2Bridge = spo2Fallback;
-      console.info('[healthkit] readByDate fallback — hrv:', hrvBridge.samples.length, 'spo2:', spo2Bridge.samples.length);
+      if (hrvBridge.samples.length === 0)  hrvBridge  = hrvFb;
+      if (rhrBridge.samples.length === 0)  rhrBridge  = rhrFb;
+      if (spo2Bridge.samples.length === 0) spo2Bridge = spo2Fb;
+      console.info('[healthkit] readByDate fallback (30d):', {
+        hrv: hrvBridge.samples.length,
+        rhr: rhrBridge.samples.length,
+        spo2: spo2Bridge.samples.length,
+      });
     } catch (e) {
       console.warn('[healthkit] readByDate fallback failed:', e);
     }
@@ -513,10 +514,16 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   const hrVals = hrData.samples.map(s => s.value).filter(v => !isNaN(v) && v > 0);
   const avgHr = hrVals.length > 0 ? hrVals.reduce((a, b) => a + b, 0) / hrVals.length : undefined;
 
-  const avgRhr = bridgeAvg(rhrBridge.samples);
-  const realHrv = bridgeAvg(hrvBridge.samples);
-  const avgSpo2 = bridgeAvg(spo2Bridge.samples);
-  const avgRR   = bridgeAvg(rrBridge.samples);
+  // Daily aggregates only use samples from the last 24h, even if the raw
+  // fetch pulled 30d of history for biomarker_samples catch-up.
+  const last24hCutoff = yesterday.toISOString();
+  const todayOnly = (samples: Array<Record<string, unknown>>) =>
+    samples.filter(s => String(s.startDate || '') >= last24hCutoff);
+
+  const avgRhr  = bridgeAvg(todayOnly(rhrBridge.samples));
+  const realHrv = bridgeAvg(todayOnly(hrvBridge.samples));
+  const avgSpo2 = bridgeAvg(todayOnly(spo2Bridge.samples));
+  const avgRR   = bridgeAvg(todayOnly(rrBridge.samples));
 
   // F1b extended metrics
   const avgVo2Max          = bridgeAvg(vo2MaxBridge.samples);

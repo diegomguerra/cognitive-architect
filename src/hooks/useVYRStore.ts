@@ -143,6 +143,22 @@ export function useVYRStore() {
 
       const scopes = ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'];
 
+      // Surface partial HealthKit grants: if any scope is sharingDenied we
+      // still proceed (user may have granted most), but log the denied types
+      // so the UI can prompt for re-auth later.
+      try {
+        const { VYRHealthBridge } = await import('@/lib/healthkit-bridge');
+        const { statuses } = await VYRHealthBridge.getAuthorizationStatuses({ types: scopes });
+        const denied = Object.entries(statuses || {})
+          .filter(([, s]) => s === 'sharingDenied')
+          .map(([t]) => t);
+        if (denied.length > 0) {
+          console.warn('[useVYRStore] HealthKit types denied by user:', denied);
+        }
+      } catch (e) {
+        console.warn('[useVYRStore] getAuthorizationStatuses failed:', e);
+      }
+
       await retryOnAuthErrorLabeled(async () => {
         const result = await supabase.from('user_integrations').upsert({
           user_id: uid,
@@ -189,9 +205,14 @@ export function useVYRStore() {
         .eq('user_id', userId).order('day', { ascending: false }).limit(7),
       supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
         .eq('user_id', userId).eq('provider', 'apple_health').maybeSingle(),
-      supabase.from('participantes').select('nome_publico')
+      supabase.from('participantes').select('nome_publico, onboarding_completo')
         .eq('user_id', userId).maybeSingle(),
     ]);
+
+    // Gate health sync on onboarding: without a completed participantes row we
+    // don't want to create user_integrations or pollute biomarker_samples with
+    // orphan data. (Fixes the 2 orphan users_ids leaking 677 samples.)
+    const onboardingDone = nameRes.data?.onboarding_completo === true;
 
     // History
     const history: DayEntry[] = (statesRes.data || []).map((d) => {
@@ -261,7 +282,7 @@ export function useVYRStore() {
       });
 
       // Auto-reconnect: re-enable background sync + auto-sync if connection was active
-      if (isActive) {
+      if (isActive && onboardingDone) {
         setConnectionActive(true);
         // Fire-and-forget: bootstrap in background, don't block loadData
         bootstrapHealthSync().then(async (synced) => {
@@ -278,9 +299,12 @@ export function useVYRStore() {
         // User must tap "Connect" again manually to avoid reconnect loops.
         console.info('[useVYRStore] Integration is disconnected, waiting for manual reconnect');
       }
-    } else {
+    } else if (onboardingDone) {
       // No integration exists at all — first time user, auto-connect
+      // (only after onboarding completed, never before)
       autoConnect(userId);
+    } else {
+      console.info('[useVYRStore] Skipping auto-connect: onboarding not completed');
     }
 
     // Name
