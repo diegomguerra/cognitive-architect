@@ -156,22 +156,15 @@ export async function isHealthKitAvailable(): Promise<boolean> {
 
 export async function requestHealthKitPermissions(): Promise<boolean> {
   try {
-    // FIX P3: Check actual authorization status first — not just a probe read.
-    // probeHealthKitRead() was returning true on empty reads (no exception = assumed granted).
+    // ROOT CAUSE FIX (SpO2/HRV gap): the old fast-path skipped the bridge
+    // request entirely when >= 3 @capgo types were already authorized. Since
+    // iOS only exposes SHARE (write) status via authorizationStatus — never
+    // READ status — the check would see hr/sleep/steps as granted and never
+    // prompt for HRV/SpO2/RHR/RR. Only early adopters who saw the old
+    // combined dialog ever got those. We now ALWAYS request both plugin and
+    // bridge on every call; iOS dedupes internally if already authorized.
     const allTypes = [...new Set([...HEALTH_READ_TYPES, ...HEALTH_WRITE_TYPES])] as string[];
     const bridgeTypes = [...BRIDGE_READ_TYPES, ...BRIDGE_ONLY_WRITE_TYPES] as string[];
-    const currentStatus = await getAuthorizationStatuses([...allTypes, ...bridgeTypes]);
-
-    const alreadyGranted = Object.entries(currentStatus)
-      .filter(([, s]) => s === 'sharingAuthorized')
-      .map(([t]) => t);
-
-    if (alreadyGranted.length >= 3) {
-      // At least 3 types explicitly authorized — skip re-requesting
-      console.info('[healthkit] permissions already granted via status check', { count: alreadyGranted.length });
-      try { await forceRefreshSession(); } catch { /* non-fatal */ }
-      return true;
-    }
 
     // Request permissions via @capgo plugin
     const { Health } = await import('@capgo/capacitor-health');
@@ -183,7 +176,8 @@ export async function requestHealthKitPermissions(): Promise<boolean> {
       console.warn('[healthkit] @capgo requestAuthorization failed:', pluginErr?.code || pluginErr);
     }
 
-    // Request permissions via bridge for additional types
+    // Request permissions via bridge for additional types — ALWAYS called,
+    // never skipped. iOS will no-op if user already authorized these types.
     let bridgeOk = false;
     try {
       const bridgeResult = await VYRHealthBridge.requestAuthorization({
