@@ -50,7 +50,33 @@ async function getBaseline(knownUserId?: string): Promise<BaselineValues> {
   };
 }
 
-async function upsertComputedState(userId: string, day: string, state: VYRState, rawInput: BiometricData) {
+/**
+ * Persist computed_states with a UNIFIED raw_input shape: the full snake_case
+ * ring_daily_data.metrics object (preserving every biomarker) plus subjective
+ * perceptions. This matches the edge function `vyr-compute-state` so admin
+ * queries and analytics don't have to juggle camelCase vs snake_case.
+ */
+async function upsertComputedState(
+  userId: string,
+  day: string,
+  state: VYRState,
+  metrics: RingMetrics | Record<string, unknown>,
+  subjective?: {
+    subjectiveEnergy?: number;
+    subjectiveClarity?: number;
+    subjectiveFocus?: number;
+    subjectiveStability?: number;
+  },
+) {
+  const raw_input = {
+    ...(metrics as Record<string, unknown>),
+    ...(subjective?.subjectiveEnergy != null && { subjectiveEnergy: subjective.subjectiveEnergy }),
+    ...(subjective?.subjectiveClarity != null && { subjectiveClarity: subjective.subjectiveClarity }),
+    ...(subjective?.subjectiveFocus != null && { subjectiveFocus: subjective.subjectiveFocus }),
+    ...(subjective?.subjectiveStability != null && { subjectiveStability: subjective.subjectiveStability }),
+    engine_version: 'client-v5',
+  };
+
   await retryOnAuthErrorLabeled(async () => {
     const result = await supabase.from('computed_states').upsert({
       user_id: userId,
@@ -59,7 +85,7 @@ async function upsertComputedState(userId: string, day: string, state: VYRState,
       level: state.level,
       pillars: state.pillars as any,
       phase: state.phase,
-      raw_input: rawInput as any,
+      raw_input: raw_input as any,
     }, { onConflict: 'user_id,day' }).select();
     return result;
   }, { table: 'computed_states', operation: 'upsert' });
@@ -112,8 +138,14 @@ export async function computeAndStoreState(day?: string, knownUserId?: string): 
   const baseline = await getBaseline(userId);
   const state = computeState(enriched, baseline);
 
-  // 4. Persist
-  await upsertComputedState(userId, targetDay, state, enriched);
+  // 4. Persist — raw_input uses the ORIGINAL snake_case metrics so admin/analytics
+  // queries have a single consistent shape across all compute paths.
+  await upsertComputedState(userId, targetDay, state, metrics, {
+    subjectiveEnergy: review?.energy_score ?? undefined,
+    subjectiveClarity: review?.clarity_score ?? undefined,
+    subjectiveFocus: review?.focus_score ?? undefined,
+    subjectiveStability: review?.mood_score ?? undefined,
+  });
 
   console.info('[vyr-recompute] State computed for', targetDay, '→ score:', state.score, state.level);
   return state;
@@ -187,17 +219,30 @@ export async function recomputeStateWithPerceptions(perceptions: SubjectivePerce
     .eq('day', today)
     .maybeSingle();
 
+  let metricsForRaw: Record<string, unknown> = {};
   if (ringRow?.metrics) {
+    metricsForRaw = ringRow.metrics as Record<string, unknown>;
     biometric = metricsToBiometric(ringRow.metrics as unknown as RingMetrics);
   } else {
-    // Fallback: use existing raw_input from computed_states
+    // Fallback: use existing raw_input from computed_states. Accept either
+    // snake_case (edge function / new client) or legacy camelCase shapes.
     const { data: existing } = await supabase
       .from('computed_states')
       .select('raw_input')
       .eq('user_id', userId)
       .eq('day', today)
       .maybeSingle();
-    biometric = (existing?.raw_input as Record<string, any>) || {};
+    const prev = (existing?.raw_input as Record<string, any>) || {};
+    metricsForRaw = prev;
+    biometric = {
+      rhr: prev.rhr ?? undefined,
+      hrvRawMs: prev.hrv_sdnn ?? prev.hrvRawMs ?? undefined,
+      hrvIndex:  prev.hrv_index ?? prev.hrvIndex ?? undefined,
+      stressLevel: prev.stress_level ?? prev.stressLevel ?? undefined,
+      sleepDuration: prev.sleep_duration_hours ?? prev.sleepDuration ?? undefined,
+      sleepQuality: prev.sleep_quality ?? prev.sleepQuality ?? undefined,
+      spo2: prev.spo2 ?? undefined,
+    };
   }
 
   // 2. Merge biometric data with subjective perceptions
@@ -213,8 +258,13 @@ export async function recomputeStateWithPerceptions(perceptions: SubjectivePerce
   const baseline = await getBaseline(userId);
   const state = computeState(enriched, baseline);
 
-  // 4. Persist
-  await upsertComputedState(userId, today, state, enriched);
+  // 4. Persist — raw_input = original metrics (snake_case) + subjective
+  await upsertComputedState(userId, today, state, metricsForRaw, {
+    subjectiveEnergy: perceptions.energy,
+    subjectiveClarity: perceptions.clarity,
+    subjectiveFocus: perceptions.focus,
+    subjectiveStability: perceptions.stability,
+  });
 
   return state;
 }
