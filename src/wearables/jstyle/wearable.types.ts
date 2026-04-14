@@ -11,6 +11,13 @@ export interface WearableDevice {
   rssi?: number;
   vendor: string;
   model: string;
+  /** Optional BLE advertisement diagnostics — iOS QRing plugin surfaces these
+   *  so we can debug unknown ring variants (e.g. Colmi R09 not advertising
+   *  the Nordic UART service UUID in its advertisement packet). */
+  advertisedServices?: string[];
+  overflowServices?: string[];
+  manufacturerData?: string;
+  looksLikeRing?: boolean;
 }
 
 /** Connection status */

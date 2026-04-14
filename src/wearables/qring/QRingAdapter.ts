@@ -76,6 +76,10 @@ export class QRingAdapter implements WearableAdapter {
         rssi: d.rssi,
         vendor: d.vendor || 'colmi',
         model: d.model || 'R02',
+        advertisedServices: d.advertisedServices,
+        overflowServices: d.overflowServices,
+        manufacturerData: d.manufacturerData,
+        looksLikeRing: d.looksLikeRing,
       });
     });
 

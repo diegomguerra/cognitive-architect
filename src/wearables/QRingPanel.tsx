@@ -104,26 +104,45 @@ export default function QRingPanel() {
 
         {!connectedDevice && devices.length > 0 && (
           <div className="space-y-2">
-            {devices.map((d) => (
-              <div
-                key={d.deviceId}
-                className="flex items-center justify-between rounded-xl border border-border p-3"
-              >
-                <div>
-                  <p className="text-xs font-medium text-foreground">{d.name}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {d.mac ?? d.deviceId}
-                    {d.rssi != null && ` · ${d.rssi} dBm`}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleConnect(d.deviceId)}
-                  className="text-xs font-medium text-primary px-3 py-1.5 rounded-lg bg-primary/10 active:scale-[0.97]"
-                >
-                  Conectar
-                </button>
-              </div>
-            ))}
+            {[...devices]
+              .sort((a, b) => {
+                // Ring-like devices first, then by signal strength
+                const aR = (a as any).looksLikeRing ? 1 : 0;
+                const bR = (b as any).looksLikeRing ? 1 : 0;
+                if (aR !== bR) return bR - aR;
+                return (b.rssi ?? -999) - (a.rssi ?? -999);
+              })
+              .map((d) => {
+                const services = (d as any).advertisedServices as string[] | undefined;
+                const ringLike = (d as any).looksLikeRing as boolean | undefined;
+                return (
+                  <div
+                    key={d.deviceId}
+                    className={`flex items-start justify-between rounded-xl border p-3 ${ringLike ? 'border-primary/50 bg-primary/5' : 'border-border'}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">
+                        {ringLike && '💍 '}{d.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        {d.mac ?? d.deviceId}
+                        {d.rssi != null && ` · ${d.rssi} dBm`}
+                      </p>
+                      {services && services.length > 0 && (
+                        <p className="text-[9px] text-muted-foreground/70 truncate font-mono mt-0.5">
+                          svc: {services.slice(0, 2).join(', ')}{services.length > 2 ? '…' : ''}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleConnect(d.deviceId)}
+                      className="text-xs font-medium text-primary px-3 py-1.5 rounded-lg bg-primary/10 active:scale-[0.97] shrink-0 ml-2"
+                    >
+                      Conectar
+                    </button>
+                  </div>
+                );
+              })}
           </div>
         )}
 

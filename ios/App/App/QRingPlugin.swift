@@ -117,9 +117,15 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["alreadyScanning": true])
             return
         }
-        // Filter by service UUID — per Colmi R02 protocol
+        // Unfiltered scan — the Colmi R09 (and possibly newer models) don't
+        // always advertise the Nordic UART service UUID in their advertisement
+        // packet, even though they support it after connect. Filtering by
+        // UUID hides them. We scan everything and emit only devices whose
+        // name looks ring-like, letting the UI list them for the user to
+        // pick. The advertised service UUIDs are also emitted so we can
+        // diagnose stack variants.
         central.scanForPeripherals(
-            withServices: [Self.serviceUUID],
+            withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
         isScanning = true
@@ -572,7 +578,26 @@ extension QRingPlugin: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        let name = peripheral.name ?? "QRing"
+        // Skip anonymous devices — we only want things with a name so the
+        // user can pick them from the list. Filters out AirPods/iPhones/
+        // random BLE beacons that have no advertised name.
+        let advName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        guard let name = advName ?? peripheral.name, !name.isEmpty else { return }
+
+        // Prefer devices that look ring-like (Colmi/QRing/R0x) but still
+        // emit others so the user can investigate unknown rings.
+        let upper = name.uppercased()
+        let looksLikeRing = upper.contains("R02") || upper.contains("R03")
+            || upper.contains("R06") || upper.contains("R09") || upper.contains("R10")
+            || upper.contains("COLMI") || upper.contains("QRING") || upper.contains("RING")
+
+        let services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map { $0.uuidString } ?? []
+        let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map { $0.uuidString } ?? []
+        let manufacturerData = (advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data)?.map { String(format: "%02X", $0) }.joined(separator: " ") ?? ""
+
+        NSLog("[QRing] didDiscover name=%@ rssi=%@ services=%@ manuf=%@",
+              name, RSSI, services.joined(separator: ","), manufacturerData)
+
         let id = peripheral.identifier.uuidString
         let ev: [String: Any] = [
             "deviceId": id,
@@ -580,7 +605,11 @@ extension QRingPlugin: CBCentralManagerDelegate {
             "mac": id,
             "rssi": RSSI.intValue,
             "vendor": "colmi",
-            "model": inferModel(from: name)
+            "model": inferModel(from: name),
+            "advertisedServices": services,
+            "overflowServices": overflow,
+            "manufacturerData": manufacturerData,
+            "looksLikeRing": looksLikeRing
         ]
         notifyListeners("deviceFound", data: ev)
     }

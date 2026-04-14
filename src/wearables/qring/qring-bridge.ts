@@ -16,6 +16,10 @@ export interface QRingDeviceFoundEvent {
   rssi: number;
   vendor: string;
   model: string;
+  advertisedServices?: string[];
+  overflowServices?: string[];
+  manufacturerData?: string;
+  looksLikeRing?: boolean;
 }
 
 export interface QRingConnectedEvent {
