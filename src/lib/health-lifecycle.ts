@@ -248,7 +248,9 @@ export function startSyncCommandListener(userId: string): void {
       console.info('[health-lifecycle] sync_commands realtime:', status);
     });
 
-  // Check for pending commands on startup
+  // Check for pending commands on startup — drains ALL pending/sent commands
+  // (previously only drained 1). This is important for users who opened the
+  // app after multiple admin-triggered syncs queued up.
   void (async () => {
     try {
       const { data: pending } = await supabase
@@ -256,12 +258,15 @@ export function startSyncCommandListener(userId: string): void {
         .select('id, command')
         .eq('user_id', userId)
         .in('status', ['pending', 'sent'])
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .order('created_at', { ascending: true }) // oldest first
+        .limit(20);
 
       if (pending && pending.length > 0) {
-        console.info('[health-lifecycle] Found pending sync command on mount:', pending[0].id);
-        void handleSyncCommand(pending[0].id, pending[0].command);
+        console.info('[health-lifecycle] Draining', pending.length, 'pending sync command(s) on mount');
+        for (const cmd of pending) {
+          // sequential await — let each sync finish before next
+          await handleSyncCommand(cmd.id, cmd.command);
+        }
       }
     } catch (e) {
       console.warn('[health-lifecycle] Failed to check pending sync commands:', e);
