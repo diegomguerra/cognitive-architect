@@ -7,6 +7,7 @@ import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
 import BiomarkerDataCard from '@/components/BiomarkerDataCard';
 import DebugConsole from '@/components/DebugConsole';
+import QRingPanel from '@/wearables/QRingPanel';
 
 const dataTypes = [
   { label: 'Frequência Cardíaca', key: 'heartRate' },
@@ -144,10 +145,19 @@ const IntegrationsPage = () => {
             <div>
               <p className="text-xs font-medium text-foreground mb-1">Dispositivos compatíveis</p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Apple Watch, QRing, Garmin, Whoop, Oura, Withings e qualquer dispositivo que sincronize com o Apple Health são suportados automaticamente.
+                Apple Watch, Garmin, Whoop, Oura, Withings e qualquer dispositivo que sincronize com o Apple Health são suportados automaticamente.
+                QRing (Colmi R02/R03/R06) conecta diretamente via Bluetooth — ver abaixo.
               </p>
             </div>
           </div>
+        </div>
+
+        {/* QRing — direct BLE (Colmi R02/R03/R06) */}
+        <div>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
+            QRing (Bluetooth direto)
+          </h3>
+          <QRingPanel />
         </div>
 
       </div>
