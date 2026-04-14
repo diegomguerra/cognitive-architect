@@ -106,6 +106,18 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var discoveredServices: [String] = []
     private var discoveredCharacteristics: [String] = []
 
+    // Monotonic sample sequence — ensures each emitted sample has a unique
+    // timestamp down to the sub-millisecond. The backend has a UNIQUE index
+    // on (user_id, type, ts, source), so two samples with the same ms would
+    // collide and fail ingestion. We nudge ts by the sequence number to
+    // guarantee uniqueness even when multiple notify packets land in the
+    // same millisecond.
+    private var sampleSeq: Double = 0
+    private func nowMsUnique() -> Double {
+        sampleSeq += 1
+        return Date().timeIntervalSince1970 * 1000 + sampleSeq
+    }
+
     private func emitDebug() {
         notifyListeners("debug", data: [
             "writesSent": writesSent,
@@ -214,6 +226,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         receivedHrPackets = 0
         expectedStepsPackets = -1
         receivedStepsPackets = 0
+        // Reset monotonic sample sequence so nudges stay bounded per sync
+        sampleSeq = 0
 
         // Sequence mirrors the Android plugin.
         sendSetTime()
@@ -556,7 +570,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         let hex = b.map { String(format: "%02X", $0) }.joined(separator: " ")
         sleepSamples.append([
             "type": "sleep",
-            "ts": Date().timeIntervalSince1970 * 1000,
+            "ts": nowMsUnique(),
             "raw": hex
         ])
         notifyListeners("syncData", data: ["type": "sleep", "samples": sleepSamples])
@@ -569,7 +583,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         if (50...100).contains(pct) {
             spo2Samples.append([
                 "type": "spo2",
-                "ts": Date().timeIntervalSince1970 * 1000,
+                "ts": nowMsUnique(),
                 "value": pct
             ])
         }
@@ -585,7 +599,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         if (1...100).contains(v) {
             stressSamples.append([
                 "type": "stress",
-                "ts": Date().timeIntervalSince1970 * 1000,
+                "ts": nowMsUnique(),
                 "value": v
             ])
         }
@@ -601,7 +615,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         if (5...250).contains(v) {
             hrvSamples.append([
                 "type": "hrv",
-                "ts": Date().timeIntervalSince1970 * 1000,
+                "ts": nowMsUnique(),
                 "value": v
             ])
         }
