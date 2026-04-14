@@ -15,12 +15,22 @@ import { useEffect, useState } from 'react';
 import { Circle, Loader2, Unplug, RefreshCw } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import { flushSamplesToBackend } from './wearable.sync';
+import { QRingPlugin, type QRingDebugEvent } from './qring/qring-bridge';
 import { toast } from 'sonner';
 
 export default function QRingPanel() {
   const [, force] = useState(0);
+  const [debug, setDebug] = useState<QRingDebugEvent | null>(null);
 
   useEffect(() => wearableStore.subscribe(() => force((n) => n + 1)), []);
+
+  useEffect(() => {
+    let handle: { remove: () => void } | null = null;
+    QRingPlugin.addListener('debug', (ev) => setDebug(ev)).then((h) => {
+      handle = h as unknown as { remove: () => void };
+    }).catch(() => { /* non-native */ });
+    return () => { try { handle?.remove(); } catch { /* noop */ } };
+  }, []);
 
   const state = wearableStore.getState();
   const { status, devices, connectedDevice, lastSyncAt, syncProgress } = state;
@@ -178,6 +188,38 @@ export default function QRingPanel() {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* BLE debug panel — visible whenever the plugin has emitted any
+            debug event. Lets us diagnose remote devices (Colmi R09 etc) by
+            surfacing raw write/notify hex and GATT tree info. */}
+        {connectedDevice && debug && (
+          <div className="rounded-xl bg-yellow-500/10 border border-yellow-500/30 p-2 text-[10px] font-mono text-foreground space-y-1">
+            <div className="font-semibold text-yellow-600 dark:text-yellow-400">BLE debug</div>
+            <div>writes sent: <span className="font-bold">{debug.writesSent}</span></div>
+            <div>notifies received: <span className="font-bold">{debug.notifiesReceived}</span></div>
+            {debug.lastWriteHex && (
+              <div className="break-all">last write: {debug.lastWriteHex}</div>
+            )}
+            {debug.lastNotifyHex && (
+              <div className="break-all">last notify: {debug.lastNotifyHex}</div>
+            )}
+            {debug.lastError && (
+              <div className="text-destructive break-all">error: {debug.lastError}</div>
+            )}
+            {debug.discoveredServices?.length > 0 && (
+              <div className="break-all">
+                services ({debug.discoveredServices.length}):{' '}
+                {debug.discoveredServices.join(', ')}
+              </div>
+            )}
+            {debug.discoveredCharacteristics?.length > 0 && (
+              <div className="break-all">
+                chars ({debug.discoveredCharacteristics.length}):{' '}
+                {debug.discoveredCharacteristics.slice(0, 20).join(' | ')}
+              </div>
+            )}
           </div>
         )}
       </div>

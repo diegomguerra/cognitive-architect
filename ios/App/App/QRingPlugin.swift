@@ -97,6 +97,27 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var expectedStepsPackets = -1
     private var receivedStepsPackets = 0
 
+    // --- Debug counters surfaced to UI for remote diagnostics ---
+    private var writesSent = 0
+    private var notifiesReceived = 0
+    private var lastWriteHex = ""
+    private var lastNotifyHex = ""
+    private var lastError = ""
+    private var discoveredServices: [String] = []
+    private var discoveredCharacteristics: [String] = []
+
+    private func emitDebug() {
+        notifyListeners("debug", data: [
+            "writesSent": writesSent,
+            "notifiesReceived": notifiesReceived,
+            "lastWriteHex": lastWriteHex,
+            "lastNotifyHex": lastNotifyHex,
+            "lastError": lastError,
+            "discoveredServices": discoveredServices,
+            "discoveredCharacteristics": discoveredCharacteristics,
+        ])
+    }
+
     override public func load() {
         central = CBCentralManager(delegate: self, queue: DispatchQueue.main)
     }
@@ -381,20 +402,53 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         let data = opQueue.removeFirst()
         opInFlight = true
         opLock.unlock()
-        // Use .withoutResponse for speed — Colmi protocol doesn't ACK writes
-        p.writeValue(data, for: wc, type: .withoutResponse)
-        // Drain next after short delay (writeWithoutResponse has no callback)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.opLock.lock()
-            self?.opInFlight = false
-            self?.opLock.unlock()
-            self?.drainQueue()
+
+        // Choose write type based on characteristic properties. Some R-series
+        // rings (like R09) only accept WithResponse even though tahnok's
+        // Python client uses WithoutResponse for R02. Detect from char props.
+        let writeType: CBCharacteristicWriteType =
+            wc.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+
+        let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        lastWriteHex = hex
+        writesSent += 1
+        NSLog("[QRing] WRITE (%@) %@", writeType == .withoutResponse ? "no-resp" : "resp", hex)
+
+        p.writeValue(data, for: wc, type: writeType)
+        emitDebug()
+
+        // With response: wait for didWriteValueFor callback. Without: fixed delay.
+        if writeType == .withoutResponse {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.opLock.lock()
+                self?.opInFlight = false
+                self?.opLock.unlock()
+                self?.drainQueue()
+            }
         }
+        // If withResponse, onWriteValue delegate will unblock the queue.
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error = error {
+            lastError = "write: \(error.localizedDescription)"
+            NSLog("[QRing] WRITE ERROR: %@", error.localizedDescription)
+        }
+        opLock.lock()
+        opInFlight = false
+        opLock.unlock()
+        emitDebug()
+        drainQueue()
     }
 
     // MARK: - Notify parser
 
     private func handleNotify(_ data: Data) {
+        let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        lastNotifyHex = hex
+        notifiesReceived += 1
+        NSLog("[QRing] NOTIFY %@", hex)
+        emitDebug()
         guard data.count >= 2 else { return }
         let bytes = [UInt8](data)
         let cmd = bytes[0]
@@ -628,7 +682,11 @@ extension QRingPlugin: CBCentralManagerDelegate {
         NSLog("[QRing] connected, discovering services…")
         // Gadgetbridge gotcha — let the ring settle 2s before discovering
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            peripheral.discoverServices([Self.serviceUUID, Self.deviceInfoServiceUUID])
+            // Discover ALL services (nil filter) so we can see R09's actual
+            // GATT tree, not just the Nordic UART we expected. Some Colmi
+            // variants expose their control characteristics on a proprietary
+            // Colmi service UUID instead of Nordic UART 6E40FFF0.
+            peripheral.discoverServices(nil)
         }
     }
 
@@ -669,7 +727,17 @@ extension QRingPlugin: CBPeripheralDelegate {
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard error == nil else { return }
-        for char in service.characteristics ?? [] {
+        let chars = service.characteristics ?? []
+        let svcShort = String(service.uuid.uuidString.prefix(8))
+        let charList = chars.map { c -> String in
+            let cs = String(c.uuid.uuidString.prefix(8))
+            return "\(svcShort)/\(cs)(\(propString(c.properties)))"
+        }
+        discoveredCharacteristics.append(contentsOf: charList)
+        NSLog("[QRing] CHARS for service %@: %@", service.uuid.uuidString, charList.joined(separator: ", "))
+        emitDebug()
+
+        for char in chars {
             switch char.uuid {
             case Self.writeUUID:
                 writeChar = char
@@ -679,11 +747,25 @@ extension QRingPlugin: CBPeripheralDelegate {
             case Self.firmwareRevUUID:
                 peripheral.readValue(for: char)
             default:
-                break
+                // Fallback heuristic — if exact UUIDs don't match (R09 variant),
+                // pick the first write-capable characteristic as writeChar and
+                // the first notify-capable one as notifyChar, skipping the
+                // device info service.
+                if service.uuid != Self.deviceInfoServiceUUID {
+                    if writeChar == nil && (char.properties.contains(.write) || char.properties.contains(.writeWithoutResponse)) {
+                        writeChar = char
+                        NSLog("[QRing] fallback writeChar = %@", char.uuid.uuidString)
+                    }
+                    if notifyChar == nil && char.properties.contains(.notify) {
+                        notifyChar = char
+                        peripheral.setNotifyValue(true, for: char)
+                        NSLog("[QRing] fallback notifyChar = %@", char.uuid.uuidString)
+                    }
+                }
             }
         }
-        // If both chars on the UART service are present, we're good to go
-        if writeChar != nil && notifyChar != nil {
+        // If both chars are present (exact or fallback), we're good to go
+        if writeChar != nil && notifyChar != nil && connectCall != nil {
             let id = peripheral.identifier.uuidString
             connectCall?.resolve([
                 "connected": true,
@@ -699,6 +781,16 @@ extension QRingPlugin: CBPeripheralDelegate {
                 "name": peripheral.name ?? "QRing"
             ])
         }
+    }
+
+    private func propString(_ p: CBCharacteristicProperties) -> String {
+        var parts: [String] = []
+        if p.contains(.read)                 { parts.append("r") }
+        if p.contains(.write)                { parts.append("w") }
+        if p.contains(.writeWithoutResponse) { parts.append("W") }
+        if p.contains(.notify)               { parts.append("n") }
+        if p.contains(.indicate)             { parts.append("i") }
+        return parts.joined()
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {

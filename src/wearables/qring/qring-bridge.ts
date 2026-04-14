@@ -58,6 +58,19 @@ export interface QRingErrorEvent {
   message: string;
 }
 
+/** Emitted on every write/notify/discovery — surfaces counters to the UI
+ *  for remote diagnostics when a BLE-specific debugging is needed (e.g.
+ *  Colmi R09 not responding to standard commands). */
+export interface QRingDebugEvent {
+  writesSent: number;
+  notifiesReceived: number;
+  lastWriteHex: string;
+  lastNotifyHex: string;
+  lastError: string;
+  discoveredServices: string[];
+  discoveredCharacteristics: string[];
+}
+
 export interface QRingPluginInterface {
   isAvailable(): Promise<{ available: boolean }>;
 
@@ -92,6 +105,7 @@ export interface QRingPluginInterface {
   addListener(eventName: 'battery', cb: (ev: QRingBatteryEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'realtime', cb: (ev: QRingRealtimeEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'error', cb: (ev: QRingErrorEvent) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'debug', cb: (ev: QRingDebugEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: string, cb: (...args: unknown[]) => void): Promise<PluginListenerHandle>;
 }
 
