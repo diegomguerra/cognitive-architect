@@ -52,6 +52,7 @@
 	<array>
 		<string>processing</string>
 		<string>remote-notification</string>
+		<string>bluetooth-central</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
@@ -68,6 +69,10 @@
 			<string>com.vyrlabs.app</string>
 		</dict>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>VYR Labs connects to your QRing (Colmi R02/R03/R06) smart ring over Bluetooth Low Energy to sync heart rate, sleep, SpO2, HRV and stress data directly from the device.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>VYR Labs needs Bluetooth to communicate with your QRing smart ring.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, and resting heart rate to compute your daily cognitive insights.</string>
 	<key>NSHealthUpdateUsageDescription</key>
