@@ -2,28 +2,57 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.vyrlabs.app.healthsync</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>VYR Labs</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.vyrlabs.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.vyrlabs.app</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<string>2</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>VYR Labs connects to your QRing (Colmi R02/R03/R06) smart ring over Bluetooth Low Energy to sync heart rate, sleep, SpO2, HRV and stress data directly from the device.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>VYR Labs needs Bluetooth to communicate with your QRing smart ring.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, and resting heart rate to compute your daily cognitive insights.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>VYR Labs writes samples for steps, body temperature, sleep, heart rate, HRV (SDNN), blood pressure (systolic + diastolic), VO2 Max, SpO2, and active energy burned to Apple Health when you grant permission. Stress is never written to Apple Health.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>processing</string>
+		<string>remote-notification</string>
+		<string>bluetooth-central</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -48,34 +77,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>processing</string>
-		<string>remote-notification</string>
-		<string>bluetooth-central</string>
-	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.vyrlabs.app.healthsync</string>
-	</array>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>com.vyrlabs.app</string>
-			</array>
-			<key>CFBundleURLName</key>
-			<string>com.vyrlabs.app</string>
-		</dict>
-	</array>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>VYR Labs connects to your QRing (Colmi R02/R03/R06) smart ring over Bluetooth Low Energy to sync heart rate, sleep, SpO2, HRV and stress data directly from the device.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>VYR Labs needs Bluetooth to communicate with your QRing smart ring.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>VYR Labs reads steps, body temperature, sleep analysis, heart rate, heart rate variability (HRV/SDNN), blood pressure (systolic and diastolic), VO2 Max, blood oxygen saturation (SpO2), active energy burned, and resting heart rate to compute your daily cognitive insights.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>VYR Labs writes samples for steps, body temperature, sleep, heart rate, HRV (SDNN), blood pressure (systolic + diastolic), VO2 Max, SpO2, and active energy burned to Apple Health when you grant permission. Stress is never written to Apple Health.</string>
 </dict>
 </plist>

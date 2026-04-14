@@ -15,11 +15,13 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		A1B2C3D400000001AABBCCDD /* VYRHealthBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCCDD /* VYRHealthBridge.swift */; };
 		A1B2C3D400000003AABBCCDD /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000004AABBCCDD /* MyViewController.swift */; };
+		BF5FF506DB73F5663A7181C7 /* QRingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 239DEC52F882B72E8F595731 /* QRingPlugin.swift */; };
 		FD8E593845434A7F9048B212 /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A3D085947A77A33B0F89894D /* Pods_App.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		03A522FF2F4CD4FD00CDC3E7 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		239DEC52F882B72E8F595731 /* QRingPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QRingPlugin.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		3D670A827E08CC765E375E9C /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
@@ -87,6 +89,7 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				239DEC52F882B72E8F595731 /* QRingPlugin.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -226,6 +229,7 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				A1B2C3D400000001AABBCCDD /* VYRHealthBridge.swift in Sources */,
 				A1B2C3D400000003AABBCCDD /* MyViewController.swift in Sources */,
+				BF5FF506DB73F5663A7181C7 /* QRingPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
