@@ -90,16 +90,16 @@ platform :ios do
     #    - skip_waiting_for_build_processing: false → waits for Apple to
     #      finish processing the binary before returning (so internal
     #      testers can install immediately on fastlane exit)
-    #    - distribute_external: true + groups: ['Public Testers'] pushes
-    #      the build to the external group automatically. First time
-    #      you do this, you'll need to create a group named "Public Testers"
-    #      in App Store Connect → TestFlight → External Groups.
+    #    - distribute_external: true + groups: ['Beta Users'] pushes
+    #      the build to the external group automatically. The group
+    #      "Beta Users" already exists in App Store Connect with an
+    #      Apple-approved public link (https://testflight.apple.com/join/J6Xd1Ubh).
     upload_to_testflight(
       api_key: api_key,
       app_identifier: "com.vyrlabs.app",
       skip_waiting_for_build_processing: false,
       distribute_external: true,
-      groups: ["Public Testers"],
+      groups: ["Beta Users"],
       changelog: File.exist?("changelog.txt") ? File.read("changelog.txt") : default_changelog
     )
   end
