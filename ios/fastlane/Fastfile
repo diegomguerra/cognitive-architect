@@ -1,12 +1,140 @@
 default_platform(:ios)
 
+# Fastlane configuration for VYR Labs iOS
+#
+# Usage (local Mac with Xcode 15+, cocoapods, fastlane gem):
+#
+#   cd ios
+#   bundle install           # first time only (or: gem install fastlane)
+#   bundle exec fastlane ios build         # build only (no upload)
+#   bundle exec fastlane ios beta          # build + upload to TestFlight
+#                                          #   → Internal testers (instant)
+#                                          #   → External/public testers
+#                                          #     (needs manual TestFlight
+#                                          #      beta review approval,
+#                                          #      usually ~24h)
+#
+# Required env vars (set in .env or shell before running):
+#   APP_STORE_CONNECT_API_KEY_ID    = key ID (e.g. ABC123DEF4)
+#   APP_STORE_CONNECT_API_ISSUER_ID = team issuer ID (UUID)
+#   APP_STORE_CONNECT_API_KEY_PATH  = path to AuthKey_XXX.p8 file
+#     (or set APP_STORE_CONNECT_API_KEY_CONTENT with the key content as string)
+#
+# If you don't have an API key yet, create one at:
+#   appstoreconnect.apple.com → Users and Access → Integrations → App Store Connect API
+#   → Generate API Key → Role: App Manager → Download the .p8 ONCE
+
 platform :ios do
-  desc "Build VYR Labs"
+  desc "Build only (no upload) — smoke test the archive"
   lane :build do
     build_app(
       workspace: "App/App.xcworkspace",
       scheme: "App",
       export_method: "app-store"
     )
+  end
+
+  desc "Build and upload to TestFlight (internal + external testers)"
+  lane :beta do
+    # 1. Authenticate with App Store Connect API (keyless, no 2FA prompt)
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_filepath: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      duration: 1200,
+      in_house: false
+    )
+
+    # 2. Bump build number automatically against TestFlight's latest
+    #    so you never have to remember to bump CURRENT_PROJECT_VERSION.
+    latest = latest_testflight_build_number(
+      app_identifier: "com.vyrlabs.app"
+    ) rescue 0
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj",
+      build_number: (latest + 1).to_s
+    )
+
+    # 3. Install pods
+    cocoapods(
+      podfile: "App/Podfile",
+      try_repo_update_on_error: true
+    )
+
+    # 4. Build signed archive
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: "build",
+      output_name: "VYR.ipa"
+    )
+
+    # 5. Upload to TestFlight
+    #    - skip_waiting_for_build_processing: false → waits for Apple to
+    #      finish processing the binary before returning (so internal
+    #      testers can install immediately on fastlane exit)
+    #    - distribute_external: true + groups: ['Public Testers'] pushes
+    #      the build to the external group automatically. First time
+    #      you do this, you'll need to create a group named "Public Testers"
+    #      in App Store Connect → TestFlight → External Groups.
+    upload_to_testflight(
+      app_identifier: "com.vyrlabs.app",
+      skip_waiting_for_build_processing: false,
+      distribute_external: true,
+      groups: ["Public Testers"],
+      changelog: File.exist?("changelog.txt") ? File.read("changelog.txt") : default_changelog
+    )
+  end
+
+  desc "Build + upload to TestFlight internal only (skip external group)"
+  lane :internal do
+    app_store_connect_api_key(
+      key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"],
+      issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"],
+      key_filepath: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      duration: 1200,
+      in_house: false
+    )
+
+    latest = latest_testflight_build_number(app_identifier: "com.vyrlabs.app") rescue 0
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj",
+      build_number: (latest + 1).to_s
+    )
+
+    cocoapods(podfile: "App/Podfile", try_repo_update_on_error: true)
+
+    build_app(
+      workspace: "App/App.xcworkspace",
+      scheme: "App",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: "build",
+      output_name: "VYR.ipa"
+    )
+
+    upload_to_testflight(
+      app_identifier: "com.vyrlabs.app",
+      skip_waiting_for_build_processing: true,
+      distribute_external: false
+    )
+  end
+
+  def default_changelog
+    <<~NOTES
+      VYR 7.8 — QRing direto via Bluetooth
+
+      • Conexão direta com anéis QRing (Colmi R02/R03/R06) via BLE,
+        sem depender do app oficial. Até ~500 amostras/dia por usuário.
+      • Biomarcadores sincronizados: HR histórico (5 min), passos
+        (15 min), sono, SpO2, estresse, HRV.
+      • Cálculo do VYR State corrigido com histórico recomputado.
+    NOTES
   end
 end
