@@ -590,6 +590,7 @@ extension QRingPlugin: CBCentralManagerDelegate {
         if n.contains("R02") { return "R02" }
         if n.contains("R03") { return "R03" }
         if n.contains("R06") { return "R06" }
+        if n.contains("R09") { return "R09" }
         if n.contains("R10") { return "R10" }
         return "R02"
     }
