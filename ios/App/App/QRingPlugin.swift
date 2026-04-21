@@ -37,26 +37,41 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     // MARK: - Constants
+
+    // V1 framing — 16-byte fixed packets + checksum on byte[15]
+    // Used by Colmi R02/R03/R06 + most R09 commands
     private static let serviceUUID = CBUUID(string: "6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E")
     private static let writeUUID   = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
     private static let notifyUUID  = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
+
+    // V2 "big data" framing — raw variable-length packets, NO pad, NO checksum.
+    // Used by R09 for temperature history (and other big-data transfers).
+    // Reference: Gadgetbridge Yawell Ring support (AGPL, algorithms only).
+    private static let serviceUUIDv2 = CBUUID(string: "DE5BF728-D711-4E47-AF26-65E3012A5DC7")
+    private static let writeUUIDv2   = CBUUID(string: "DE5BF72A-D711-4E47-AF26-65E3012A5DC7")
+    private static let notifyUUIDv2  = CBUUID(string: "DE5BF729-D711-4E47-AF26-65E3012A5DC7")
 
     // Standard Device Info Service
     private static let deviceInfoServiceUUID = CBUUID(string: "180A")
     private static let firmwareRevUUID       = CBUUID(string: "2A26")
 
-    // Commands
-    private static let CMD_SET_TIME:     UInt8 = 0x01
-    private static let CMD_BATTERY:      UInt8 = 0x03
-    private static let CMD_HR_HISTORY:   UInt8 = 0x15
-    private static let CMD_HR_SETTINGS:  UInt8 = 0x16
-    private static let CMD_SPO2_HISTORY: UInt8 = 0x2C
-    private static let CMD_STRESS_HIST:  UInt8 = 0x37
-    private static let CMD_HRV_HISTORY:  UInt8 = 0x39
-    private static let CMD_STEPS_HIST:   UInt8 = 0x43
-    private static let CMD_SLEEP_HIST:   UInt8 = 0x44
-    private static let CMD_REALTIME:     UInt8 = 0x69
-    private static let CMD_STOP_REALTIME: UInt8 = 0x6A
+    // V1 Commands
+    private static let CMD_SET_TIME:        UInt8 = 0x01
+    private static let CMD_BATTERY:         UInt8 = 0x03
+    private static let CMD_HR_HISTORY:      UInt8 = 0x15
+    private static let CMD_HR_SETTINGS:     UInt8 = 0x16
+    private static let CMD_SPO2_HISTORY:    UInt8 = 0x2C
+    private static let CMD_STRESS_HIST:     UInt8 = 0x37
+    private static let CMD_AUTO_TEMP_PREF:  UInt8 = 0x3A    // R09: enable continuous temperature
+    private static let CMD_HRV_HISTORY:     UInt8 = 0x39
+    private static let CMD_STEPS_HIST:      UInt8 = 0x43
+    private static let CMD_SLEEP_HIST:      UInt8 = 0x44
+    private static let CMD_REALTIME:        UInt8 = 0x69
+    private static let CMD_STOP_REALTIME:   UInt8 = 0x6A
+
+    // V2 Commands
+    private static let CMD_BIG_DATA_V2:         UInt8 = 0xBC
+    private static let BIG_DATA_TYPE_TEMP:      UInt8 = 0x25
 
     private static let RT_TYPE_HR:   UInt8 = 0x01
     private static let RT_TYPE_SPO2: UInt8 = 0x03
@@ -64,22 +79,40 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private static let PACKET_SIZE = 16
 
+    // Feature flags (runtime-configurable via sync options)
+    // - historyEnabled: send V1 history commands (0x15 HR, 0x43 Steps, 0x44 Sleep,
+    //   0x2C SpO2, 0x37 Stress, 0x39 HRV). Currently OFF by default because the R09
+    //   parser emits garbage for some of these. Re-enable after parser is validated.
+    // - debugRawEnabled: emit EVERY notify packet as a `debug_raw` sample. Always ON
+    //   until parser is validated, so we keep a reverse-engineering corpus.
+    private var historyEnabled = false
+    private var debugRawEnabled = true
+
     // MARK: - State
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var writeChar: CBCharacteristic?
     private var notifyChar: CBCharacteristic?
+    // V2 characteristics (temperature). Optional — not all rings have them.
+    private var writeCharV2: CBCharacteristic?
+    private var notifyCharV2: CBCharacteristic?
     private var firmwareRev: String?
 
     private var isScanning = false
     private var connectCall: CAPPluginCall?
     private var pendingSyncCall: CAPPluginCall?
 
-    // Op queue (CoreBluetooth allows parallel writes w/o response, but we
-    // still serialize for notify reliability).
+    // Op queue for V1 writes (CoreBluetooth allows parallel writes w/o response,
+    // but we still serialize for notify reliability).
     private var opQueue: [Data] = []
     private var opInFlight = false
     private let opLock = NSLock()
+
+    // Op queue for V2 writes (temperature "big data" channel). Separate queue
+    // because it uses a different characteristic and different timing semantics.
+    private var opQueueV2: [Data] = []
+    private var opInFlightV2 = false
+    private let opLockV2 = NSLock()
 
     // Sync buffers
     private var hrSamples: [[String: Any]] = []
@@ -88,6 +121,16 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var spo2Samples: [[String: Any]] = []
     private var hrvSamples: [[String: Any]] = []
     private var stressSamples: [[String: Any]] = []
+    private var tempSamples: [[String: Any]] = []
+    private var realtimeHrSamples: [[String: Any]] = []
+    private var realtimeSpo2Samples: [[String: Any]] = []
+    private var realtimeHrvSamples: [[String: Any]] = []
+    private var debugRawSamples: [[String: Any]] = []
+
+    // V2 temperature packet assembler. V2 responses can span multiple BLE notifications;
+    // we accumulate until we have the declared payload length.
+    private var tempBuffer = Data()
+    private var tempExpectedLength = -1
 
     private var expectedHrPackets = -1
     private var receivedHrPackets = 0
@@ -216,12 +259,24 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         pendingSyncCall = call
+        // Flags from JS layer override defaults (allows live enabling history from debug UI)
+        if let hist = call.getBool("historyEnabled") { historyEnabled = hist }
+        if let dr = call.getBool("debugRawEnabled") { debugRawEnabled = dr }
+
+        // Reset buffers
         hrSamples.removeAll()
         stepsSamples.removeAll()
         sleepSamples.removeAll()
         spo2Samples.removeAll()
         hrvSamples.removeAll()
         stressSamples.removeAll()
+        tempSamples.removeAll()
+        realtimeHrSamples.removeAll()
+        realtimeSpo2Samples.removeAll()
+        realtimeHrvSamples.removeAll()
+        debugRawSamples.removeAll()
+        tempBuffer.removeAll()
+        tempExpectedLength = -1
         expectedHrPackets = -1
         receivedHrPackets = 0
         expectedStepsPackets = -1
@@ -229,37 +284,95 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         // Reset monotonic sample sequence so nudges stay bounded per sync
         sampleSeq = 0
 
-        // Sequence mirrors the Android plugin.
+        // --- Core sync sequence (realtime-first) ---
+        // Phase 1: setup — SetTime + Battery + enable temp measurement on ring
         sendSetTime()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self = self else { return }
             self.sendBattery()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.sendHRSettings(enable: true, intervalMinutes: 5) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.sendHRHistory(dayOffset: 0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { self.sendStepsHistory(dayOffset: 0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.sendSleepHistory(dayOffset: 0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.sendSpo2History(dayOffset: 0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { self.sendStressHistory(dayOffset: 0) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                if self.isHrvSupported() { self.sendHrvHistory(dayOffset: 0) }
-            }
-            // Resolve sync call after a quiet period
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-                if let c = self.pendingSyncCall {
-                    c.resolve([
-                        "hr_count": self.hrSamples.count,
-                        "steps_count": self.stepsSamples.count,
-                        "sleep_count": self.sleepSamples.count,
-                        "spo2_count": self.spo2Samples.count,
-                        "hrv_count": self.hrvSamples.count,
-                        "stress_count": self.stressSamples.count,
-                        "fw_version": self.firmwareRev ?? ""
-                    ])
-                    self.pendingSyncCall = nil
-                }
-                self.notifyListeners("syncEnd", data: ["type": "all"])
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.sendTemperaturePref(enable: true)
+        }
+
+        // Phase 2: temperature history request on V2 channel (R09 supports; older
+        // rings respond with nothing — harmless if writeCharV2 is nil, write is skipped)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sendTemperatureHistoryRequest()
+        }
+
+        // Phase 3: realtime readings — single snapshot HR/SpO2/HRV. Ring auto-stops
+        // after ~10s per type. Space them 2.5s apart so each auto-stops before
+        // the next starts (some firmwares don't multiplex realtime types).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.sendRealtime(type: Self.RT_TYPE_HR)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+            self?.sendRealtime(type: Self.RT_TYPE_SPO2)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in
+            guard let self = self else { return }
+            if self.isHrvSupported() {
+                self.sendRealtime(type: Self.RT_TYPE_HRV)
             }
         }
+
+        // Phase 4 (optional, gated): V1 history commands — only if flag enabled.
+        // Parser is known broken for R09 on some types; keep off until validated.
+        if historyEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) { [weak self] in
+                guard let self = self else { return }
+                self.sendHRSettings(enable: true, intervalMinutes: 5)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.sendHRHistory(dayOffset: 0) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.sendStepsHistory(dayOffset: 0) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.sendSleepHistory(dayOffset: 0) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.sendSpo2History(dayOffset: 0) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.sendStressHistory(dayOffset: 0) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    if self.isHrvSupported() { self.sendHrvHistory(dayOffset: 0) }
+                }
+            }
+        }
+
+        // Phase 5: resolve after quiet period. Longer window if history is on.
+        let quietDelay: TimeInterval = historyEnabled ? 14.0 : 11.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + quietDelay) { [weak self] in
+            guard let self = self else { return }
+
+            // Flush any buffered realtime samples as syncData events
+            self.flushRealtimeBatch(type: "hr_realtime", samples: &self.realtimeHrSamples)
+            self.flushRealtimeBatch(type: "spo2_realtime", samples: &self.realtimeSpo2Samples)
+            self.flushRealtimeBatch(type: "hrv_realtime", samples: &self.realtimeHrvSamples)
+            // Debug raw is flushed continuously during sync as batches fill; flush any leftover
+            self.flushDebugRawBatch(force: true)
+
+            if let c = self.pendingSyncCall {
+                c.resolve([
+                    "hr_count": self.hrSamples.count,
+                    "steps_count": self.stepsSamples.count,
+                    "sleep_count": self.sleepSamples.count,
+                    "spo2_count": self.spo2Samples.count,
+                    "hrv_count": self.hrvSamples.count,
+                    "stress_count": self.stressSamples.count,
+                    "temp_count": self.tempSamples.count,
+                    "rt_hr_count": self.realtimeHrSamples.count,
+                    "rt_spo2_count": self.realtimeSpo2Samples.count,
+                    "rt_hrv_count": self.realtimeHrvSamples.count,
+                    "fw_version": self.firmwareRev ?? "",
+                    "history_enabled": self.historyEnabled,
+                    "debug_raw_enabled": self.debugRawEnabled,
+                ])
+                self.pendingSyncCall = nil
+            }
+            self.notifyListeners("syncEnd", data: ["type": "all"])
+        }
+    }
+
+    private func flushRealtimeBatch(type: String, samples: inout [[String: Any]]) {
+        guard !samples.isEmpty else { return }
+        notifyListeners("syncData", data: ["type": type, "samples": samples])
+        notifyListeners("syncEnd", data: ["type": type])
+        samples.removeAll()
     }
 
     @objc func enableRealtime(_ call: CAPPluginCall) {
@@ -273,13 +386,20 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("UNKNOWN_REALTIME_TYPE: \(type)")
             return
         }
+        sendRealtime(type: subType)
+        call.resolve(["started": true])
+    }
+
+    /// Start realtime stream for a single biomarker type (0x69 request).
+    /// Ring emits periodic readings for ~10s, then auto-stops. Caller is
+    /// responsible for capturing values via notify parser.
+    private func sendRealtime(type: UInt8) {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_REALTIME
-        pkt[1] = subType
+        pkt[1] = type
         pkt[2] = 0x01
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
-        call.resolve(["started": true])
     }
 
     // MARK: - Command builders
@@ -386,6 +506,37 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         queueWrite(Data(pkt))
     }
 
+    /// Enable/disable automatic temperature measurement on the ring.
+    /// Without this, the ring won't log temperature and history request returns empty.
+    /// V1 framing, command 0x3A, subcommand 0x02 (write), payload[0] = 1/0.
+    private func sendTemperaturePref(enable: Bool) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.CMD_AUTO_TEMP_PREF
+        pkt[1] = 0x03              // length of subcommand section
+        pkt[2] = 0x02              // PREF_WRITE (0x01 = read)
+        pkt[3] = enable ? 0x01 : 0x00
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Request temperature history via V2 "big data" channel.
+    /// Packet format is RAW variable length — no pad, no checksum.
+    /// Payload: `BC 25 01 00 3E 81 02` (7 bytes). Sent only if V2 writeChar is
+    /// present (Colmi R09 has it; older rings do not — skipped silently).
+    private func sendTemperatureHistoryRequest() {
+        guard writeCharV2 != nil, peripheral != nil else {
+            NSLog("[QRing] skip temperature history — V2 write char not available")
+            return
+        }
+        let pkt = Data([
+            Self.CMD_BIG_DATA_V2,           // 0xBC
+            Self.BIG_DATA_TYPE_TEMP,        // 0x25
+            0x01, 0x00,                     // length LE = 1
+            0x3E, 0x81, 0x02                // payload
+        ])
+        queueWriteV2(pkt)
+    }
+
     private func isHrvSupported() -> Bool {
         guard let fw = firmwareRev else { return false }
         let parts = fw.split(separator: ".").compactMap { Int($0) }
@@ -448,11 +599,63 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             lastError = "write: \(error.localizedDescription)"
             NSLog("[QRing] WRITE ERROR: %@", error.localizedDescription)
         }
-        opLock.lock()
-        opInFlight = false
-        opLock.unlock()
+        if characteristic.uuid == Self.writeUUIDv2 || characteristic == writeCharV2 {
+            opLockV2.lock()
+            opInFlightV2 = false
+            opLockV2.unlock()
+            emitDebug()
+            drainQueueV2()
+        } else {
+            opLock.lock()
+            opInFlight = false
+            opLock.unlock()
+            emitDebug()
+            drainQueue()
+        }
+    }
+
+    // MARK: - V2 BLE op queue (big-data channel, raw variable-length)
+
+    private func queueWriteV2(_ data: Data) {
+        opLockV2.lock()
+        opQueueV2.append(data)
+        opLockV2.unlock()
+        drainQueueV2()
+    }
+
+    private func drainQueueV2() {
+        opLockV2.lock()
+        if opInFlightV2 {
+            opLockV2.unlock()
+            return
+        }
+        guard !opQueueV2.isEmpty, let p = peripheral, let wc = writeCharV2 else {
+            opLockV2.unlock()
+            return
+        }
+        let data = opQueueV2.removeFirst()
+        opInFlightV2 = true
+        opLockV2.unlock()
+
+        let writeType: CBCharacteristicWriteType =
+            wc.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
+
+        let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        lastWriteHex = "V2: \(hex)"
+        writesSent += 1
+        NSLog("[QRing] WRITE V2 (%@) %@", writeType == .withoutResponse ? "no-resp" : "resp", hex)
+
+        p.writeValue(data, for: wc, type: writeType)
         emitDebug()
-        drainQueue()
+
+        if writeType == .withoutResponse {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.opLockV2.lock()
+                self?.opInFlightV2 = false
+                self?.opLockV2.unlock()
+                self?.drainQueueV2()
+            }
+        }
     }
 
     // MARK: - Notify parser
@@ -461,24 +664,155 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
         lastNotifyHex = hex
         notifiesReceived += 1
-        NSLog("[QRing] NOTIFY %@", hex)
+        NSLog("[QRing] NOTIFY V1 %@", hex)
         emitDebug()
         guard data.count >= 2 else { return }
+
+        // Capture every V1 notify as debug_raw for reverse engineering
+        emitDebugRaw(channel: "v1", hex: hex)
+
         let bytes = [UInt8](data)
         let cmd = bytes[0]
+
+        // Always parse lightweight / well-known commands
         switch cmd {
-        case Self.CMD_BATTERY:      parseBattery(bytes)
-        case Self.CMD_HR_HISTORY:   parseHrHistory(bytes)
-        case Self.CMD_HR_SETTINGS:  NSLog("[QRing] hr-settings ack")
-        case Self.CMD_STEPS_HIST:   parseStepsHistory(bytes)
-        case Self.CMD_SLEEP_HIST:   parseSleepHistory(bytes)
-        case Self.CMD_SPO2_HISTORY: parseSpo2History(bytes)
-        case Self.CMD_STRESS_HIST:  parseStressHistory(bytes)
-        case Self.CMD_HRV_HISTORY:  parseHrvHistory(bytes)
-        case Self.CMD_REALTIME:     parseRealtime(bytes)
-        case Self.CMD_SET_TIME:     NSLog("[QRing] set-time ack")
-        default:
-            NSLog("[QRing] unhandled cmd 0x%02X", cmd)
+        case Self.CMD_BATTERY:      parseBattery(bytes); return
+        case Self.CMD_HR_SETTINGS:  NSLog("[QRing] hr-settings ack"); return
+        case Self.CMD_SET_TIME:     NSLog("[QRing] set-time ack"); return
+        case Self.CMD_AUTO_TEMP_PREF: NSLog("[QRing] auto-temp pref ack: \(bytes[3])"); return
+        case Self.CMD_REALTIME:     parseRealtime(bytes); return
+        default: break
+        }
+
+        // History commands are gated because their parsers are known-broken on R09.
+        // When historyEnabled=false we still capture bytes via debug_raw above but
+        // skip the buggy parsers. When flipped on (after parser rewrite), the
+        // regular samples flow again.
+        if historyEnabled {
+            switch cmd {
+            case Self.CMD_HR_HISTORY:   parseHrHistory(bytes)
+            case Self.CMD_STEPS_HIST:   parseStepsHistory(bytes)
+            case Self.CMD_SLEEP_HIST:   parseSleepHistory(bytes)
+            case Self.CMD_SPO2_HISTORY: parseSpo2History(bytes)
+            case Self.CMD_STRESS_HIST:  parseStressHistory(bytes)
+            case Self.CMD_HRV_HISTORY:  parseHrvHistory(bytes)
+            default:
+                NSLog("[QRing] unhandled cmd 0x%02X", cmd)
+            }
+        } else {
+            NSLog("[QRing] cmd 0x%02X received — parser gated off (historyEnabled=false)", cmd)
+        }
+    }
+
+    /// Handle incoming V2 "big data" notification (temperature, etc.)
+    /// Responses can span multiple packets; we assemble into tempBuffer until
+    /// we've received the declared payload length.
+    private func handleNotifyV2(_ data: Data) {
+        let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        lastNotifyHex = "V2: \(hex)"
+        notifiesReceived += 1
+        NSLog("[QRing] NOTIFY V2 %@", hex)
+        emitDebug()
+
+        // Always capture for reverse engineering
+        emitDebugRaw(channel: "v2", hex: hex)
+
+        // V2 header: BC <type> <len_lo> <len_hi> <?> <?> <payload...>
+        // For temperature, type=0x25. We assemble until buffer has header(6) + len bytes.
+        if data.count >= 4 && data[0] == Self.CMD_BIG_DATA_V2 && data[1] == Self.BIG_DATA_TYPE_TEMP {
+            // Start of a new temperature response
+            tempBuffer = data
+            tempExpectedLength = Int(data[2]) | (Int(data[3]) << 8)
+            NSLog("[QRing] V2 temp response start — declared length: \(tempExpectedLength), received \(data.count) so far")
+        } else if tempExpectedLength > 0 {
+            // Continuation
+            tempBuffer.append(data)
+        } else {
+            // Unknown V2 notification
+            NSLog("[QRing] V2 unknown framing — first bytes: %02X %02X", data.count > 0 ? data[0] : 0, data.count > 1 ? data[1] : 0)
+            return
+        }
+
+        // If we have the full payload, parse it
+        if tempBuffer.count >= 6 + tempExpectedLength {
+            parseTemperatureV2(tempBuffer)
+            tempBuffer.removeAll()
+            tempExpectedLength = -1
+        }
+    }
+
+    /// Emit a debug_raw sample — hex dump of a notify packet for reverse engineering.
+    /// Batched internally (flushed when buffer reaches ~20 samples or at sync end).
+    private func emitDebugRaw(channel: String, hex: String) {
+        guard debugRawEnabled else { return }
+        debugRawSamples.append([
+            "type": "debug_raw",
+            "ts": nowMsUnique(),
+            "raw": hex,
+            "channel": channel,    // "v1" or "v2"
+        ])
+        if debugRawSamples.count >= 20 {
+            flushDebugRawBatch(force: false)
+        }
+    }
+
+    private func flushDebugRawBatch(force: Bool) {
+        guard !debugRawSamples.isEmpty else { return }
+        // Always emit as syncData so the frontend accumulates them for upload
+        notifyListeners("syncData", data: ["type": "debug_raw", "samples": debugRawSamples])
+        debugRawSamples.removeAll()
+        if force {
+            notifyListeners("syncEnd", data: ["type": "debug_raw"])
+        }
+    }
+
+    /// Parse assembled V2 temperature payload.
+    /// Layout: `BC 25 <len_lo> <len_hi> <?> <?>` (6-byte header) followed by
+    /// repeating day blocks: 1 byte days_ago + 1 byte separator (0x1E) + 48 bytes
+    /// (24 hours × 2 half-hour samples). `temp_c = (unsigned_byte / 10) + 20`.
+    /// A value of 0 means "no sample".
+    private func parseTemperatureV2(_ data: Data) {
+        guard data.count >= 6 else { return }
+        let length = Int(data[2]) | (Int(data[3]) << 8)
+        NSLog("[QRing] parsing V2 temperature payload — length \(length), buffer \(data.count)")
+        var index = 6
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        while index < data.count, index - 6 < length {
+            let daysAgo = Int(data[index]); index += 1
+            if daysAgo == 0 && index > 7 {
+                // Sentinel: some firmwares mark end of stream
+                break
+            }
+            // Skip separator (should be 0x1E)
+            if index < data.count { index += 1 }
+            guard let dayStart = cal.date(byAdding: .day, value: -daysAgo, to: today) else { continue }
+            let dayStartSec = dayStart.timeIntervalSince1970
+
+            for slot in 0..<48 {
+                guard index < data.count else { break }
+                let rawByte = data[index]; index += 1
+                if rawByte == 0 { continue } // no sample
+                let celsius = (Double(rawByte) / 10.0) + 20.0
+                // Skip physiologically impossible values (ring worn on finger: 28-40°C)
+                guard (15.0...45.0).contains(celsius) else { continue }
+                let tsSec = dayStartSec + Double(slot) * 30 * 60  // 30-min slots
+                tempSamples.append([
+                    "type": "temp",
+                    "ts": tsSec * 1000,
+                    "value": celsius,
+                ])
+            }
+        }
+
+        if !tempSamples.isEmpty {
+            notifyListeners("syncData", data: ["type": "temp", "samples": tempSamples])
+            notifyListeners("syncEnd", data: ["type": "temp"])
+            NSLog("[QRing] emitted \(tempSamples.count) temperature samples")
+            tempSamples.removeAll()
+        } else {
+            NSLog("[QRing] V2 temperature parse yielded 0 samples")
         }
     }
 
@@ -627,12 +961,45 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseRealtime(_ b: [UInt8]) {
+        // Layout: [0]=0x69 (cmd), [1]=type, [2]=value (for HR/SpO2),
+        // HRV uses bytes[2..3] LE 16-bit for RMSSD in ms (firmware ≥ 3.00.10).
         let type = b[1]
         let v = Int(b[2])
+
+        // Skip "no reading" sentinels (0 or status codes). Ring emits these
+        // during the warm-up before first real reading.
+        guard v > 0 else { return }
+
+        let now = nowMsUnique()
         switch type {
-        case Self.RT_TYPE_HR:   notifyListeners("realtime", data: ["type": "hr_realtime",   "value": v])
-        case Self.RT_TYPE_SPO2: notifyListeners("realtime", data: ["type": "spo2_realtime", "value": v])
-        case Self.RT_TYPE_HRV:  notifyListeners("realtime", data: ["type": "hrv_realtime",  "value": v])
+        case Self.RT_TYPE_HR:
+            // Physiological range 30-220 bpm
+            guard (30...220).contains(v) else { return }
+            realtimeHrSamples.append([
+                "type": "hr",
+                "ts": now,
+                "value": v,
+            ])
+            notifyListeners("realtime", data: ["type": "hr_realtime", "value": v])
+        case Self.RT_TYPE_SPO2:
+            // Physiological range 70-100%
+            guard (70...100).contains(v) else { return }
+            realtimeSpo2Samples.append([
+                "type": "spo2",
+                "ts": now,
+                "value": v,
+            ])
+            notifyListeners("realtime", data: ["type": "spo2_realtime", "value": v])
+        case Self.RT_TYPE_HRV:
+            // HRV RMSSD typically 15-200 ms. Byte layout may be single byte or LE 16-bit
+            // depending on firmware — validate range.
+            guard (5...250).contains(v) else { return }
+            realtimeHrvSamples.append([
+                "type": "hrv",
+                "ts": now,
+                "value": v,
+            ])
+            notifyListeners("realtime", data: ["type": "hrv_realtime", "value": v])
         default: break
         }
     }
@@ -730,11 +1097,22 @@ extension QRingPlugin: CBPeripheralDelegate {
             connectCall = nil
             return
         }
+        // Track discovered services for debug UI
+        discoveredServices = (peripheral.services ?? []).map { $0.uuid.uuidString }
+        emitDebug()
+
         for service in peripheral.services ?? [] {
             if service.uuid == Self.serviceUUID {
                 peripheral.discoverCharacteristics([Self.writeUUID, Self.notifyUUID], for: service)
+            } else if service.uuid == Self.serviceUUIDv2 {
+                // V2 "big data" service (temperature on R09)
+                peripheral.discoverCharacteristics([Self.writeUUIDv2, Self.notifyUUIDv2], for: service)
             } else if service.uuid == Self.deviceInfoServiceUUID {
                 peripheral.discoverCharacteristics([Self.firmwareRevUUID], for: service)
+            } else {
+                // Unknown services still discovered so fallback heuristics can find
+                // write/notify chars when the exact UUIDs don't match.
+                peripheral.discoverCharacteristics(nil, for: service)
             }
         }
     }
@@ -755,9 +1133,18 @@ extension QRingPlugin: CBPeripheralDelegate {
             switch char.uuid {
             case Self.writeUUID:
                 writeChar = char
+                NSLog("[QRing] V1 writeChar set")
             case Self.notifyUUID:
                 notifyChar = char
                 peripheral.setNotifyValue(true, for: char)
+                NSLog("[QRing] V1 notifyChar set + subscribed")
+            case Self.writeUUIDv2:
+                writeCharV2 = char
+                NSLog("[QRing] V2 writeChar set (big-data / temperature)")
+            case Self.notifyUUIDv2:
+                notifyCharV2 = char
+                peripheral.setNotifyValue(true, for: char)
+                NSLog("[QRing] V2 notifyChar set + subscribed")
             case Self.firmwareRevUUID:
                 peripheral.readValue(for: char)
             default:
@@ -816,7 +1203,10 @@ extension QRingPlugin: CBPeripheralDelegate {
             }
             return
         }
-        if characteristic.uuid == Self.notifyUUID {
+        // Route V1 vs V2 notifications — V2 uses big-data framing (temperature etc.)
+        if characteristic.uuid == Self.notifyUUIDv2 || characteristic == notifyCharV2 {
+            handleNotifyV2(data)
+        } else {
             handleNotify(data)
         }
     }
