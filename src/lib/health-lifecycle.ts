@@ -13,6 +13,7 @@ import { VYRHealthBridge } from './healthkit-bridge';
 import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync, syncHealthKitData } from './healthkit';
 import { computeAndStoreState } from './vyr-recompute';
 import { registerPushToken, setupPushSyncHandler, unregisterPushToken } from './push-sync';
+import { runQRingSyncIfPaired } from '@/wearables/wearable.sync';
 import { supabase } from '@/integrations/supabase/client';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -190,21 +191,48 @@ async function handleSyncCommand(commandId: string, command: string): Promise<vo
     .eq('id', commandId);
 
   try {
-    const ok = await syncHealthKitData();
+    // 1. HealthKit sync — primary source on iOS
+    const healthKitOk = await syncHealthKitData();
+
+    // 2. QRing BLE sync — best-effort, only runs if a ring is paired
+    let qringSummary: Awaited<ReturnType<typeof runQRingSyncIfPaired>> = { ran: false };
+    try {
+      qringSummary = await runQRingSyncIfPaired();
+      console.info('[health-lifecycle] QRing sync summary:', qringSummary);
+    } catch (e: any) {
+      console.warn('[health-lifecycle] QRing sync threw (non-fatal):', e);
+      qringSummary = { ran: true, reason: 'exception', inserted: 0, duplicates: 0, errors: 1 };
+    }
+
+    // 3. Refresh VYR state (compute from ring_daily_data + biomarker_samples)
+    let vyrRecomputed = false;
+    try {
+      await computeAndStoreState();
+      vyrRecomputed = true;
+    } catch (e: any) {
+      console.warn('[health-lifecycle] VYR recompute threw (non-fatal):', e);
+    }
+
+    const overallOk = healthKitOk; // HealthKit is the primary contract for "success"
 
     await supabase
       .from('sync_commands')
       .update({
-        status: ok ? 'completed' : 'failed',
+        status: overallOk ? 'completed' : 'failed',
         updated_at: new Date().toISOString(),
         completed_at: new Date().toISOString(),
-        result: ok
-          ? { synced_at: new Date().toISOString(), source: 'apple_health' }
-          : { error: 'syncHealthKitData returned false' },
+        result: {
+          synced_at: new Date().toISOString(),
+          source: 'apple_health',
+          healthkit_ok: healthKitOk,
+          qring: qringSummary,
+          vyr_recomputed: vyrRecomputed,
+        },
       })
       .eq('id', commandId);
 
-    console.info('[health-lifecycle] Remote sync', ok ? 'completed' : 'failed');
+    console.info('[health-lifecycle] Remote sync', overallOk ? 'completed' : 'failed',
+      '— QRing ran:', qringSummary.ran, 'VYR recomputed:', vyrRecomputed);
   } catch (e: any) {
     console.error('[health-lifecycle] Remote sync error:', e);
     await supabase

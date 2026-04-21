@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react';
 import { Circle, Loader2, Unplug, RefreshCw } from 'lucide-react';
 import { wearableStore } from './wearable.store';
-import { flushSamplesToBackend } from './wearable.sync';
+import { flushSamplesToBackend, rememberPairedQRing, forgetPairedQRing } from './wearable.sync';
 import { QRingPlugin, type QRingDebugEvent } from './qring/qring-bridge';
 import { toast } from 'sonner';
 
@@ -42,10 +42,19 @@ export default function QRingPanel() {
 
   const handleConnect = async (id: string) => {
     const ok = await wearableStore.connect(id);
-    if (!ok) toast.error('Falha ao conectar ao QRing');
+    if (!ok) {
+      toast.error('Falha ao conectar ao QRing');
+      return;
+    }
+    // Persist so admin-triggered syncs can best-effort reconnect
+    const device = wearableStore.getState().connectedDevice;
+    rememberPairedQRing(id, device?.name);
   };
 
-  const handleDisconnect = () => wearableStore.disconnect();
+  const handleDisconnect = async () => {
+    forgetPairedQRing();
+    await wearableStore.disconnect();
+  };
 
   const handleSync = async () => {
     try {
