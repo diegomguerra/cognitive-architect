@@ -49,13 +49,19 @@ platform :ios do
       in_house: false
     )
 
-    # 2. Bump build number automatically against TestFlight's latest
-    #    so you never have to remember to bump CURRENT_PROJECT_VERSION.
+    # 2. Bump build number — use max(latest_testflight+1, current_in_plist+1) so we
+    #    never collide with an already-uploaded build. This handles the race where
+    #    App Store Connect API hasn't caught up yet but we know our local version.
     latest = latest_testflight_build_number(
       api_key: api_key,
       app_identifier: "com.vyrlabs.app"
     ) rescue 0
-    new_build_number = (latest + 1).to_s
+    current = get_info_plist_value(
+      path: "App/App/Info.plist",
+      key: "CFBundleVersion"
+    ).to_i rescue 0
+    new_build_number = ([latest.to_i, current].max + 1).to_s
+    UI.message("latest_on_testflight=#{latest}  current_local=#{current}  new=#{new_build_number}")
     increment_build_number(
       xcodeproj: "App/App.xcodeproj",
       build_number: new_build_number

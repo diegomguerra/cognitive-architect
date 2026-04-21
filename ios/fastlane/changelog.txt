@@ -1,0 +1,9 @@
+QRing agora puxa temperatura do anel R09 + snapshot em tempo real de HR, SpO2 e HRV a cada Sync.
+
+Novidades:
+- Temperatura histórica capturada via novo canal V2 "big data" (exclusivo R09)
+- Leituras reais de HR, SpO2 e HRV (modo realtime, 10s cada) em cada sync
+- Parser de histórico antigo foi desativado enquanto reverte engenharia para R09 — nada de valor errado chegando ao dashboard
+- Todo pacote BLE recebido vai também como debug_raw (silencioso) para acelerar correção do parser
+
+Para usuários sem anel: fluxo igual ao anterior (HealthKit continua normal).
