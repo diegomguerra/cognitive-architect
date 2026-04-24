@@ -6,6 +6,7 @@
  */
 
 import { PushNotifications } from '@capacitor/push-notifications';
+import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/integrations/supabase/client';
 import { syncHealthKitData } from '@/lib/healthkit';
@@ -35,13 +36,16 @@ export async function registerPushToken(userId: string): Promise<void> {
       console.info('[push-sync] APNs token received:', token.value.substring(0, 20) + '...');
 
       try {
+        const appInfo = await CapApp.getInfo();
+        const appVersion = `${appInfo.version}(${appInfo.build})`;
+
         await supabase.from('push_tokens').upsert(
           {
             user_id: userId,
             platform: 'apple',
             token: token.value,
             is_active: true,
-            app_version: '__APP_VERSION__',
+            app_version: appVersion,
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'user_id,platform' }

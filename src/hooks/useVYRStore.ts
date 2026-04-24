@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
@@ -213,6 +215,20 @@ export function useVYRStore() {
     // don't want to create user_integrations or pollute biomarker_samples with
     // orphan data. (Fixes the 2 orphan users_ids leaking 677 samples.)
     const onboardingDone = nameRes.data?.onboarding_completo === true;
+
+    // Report app version to participantes (fire-and-forget)
+    if (Capacitor.isNativePlatform()) {
+      CapApp.getInfo().then(info => {
+        const ver = `${info.version}(${info.build})`;
+        supabase.from('participantes')
+          .update({ app_version: ver })
+          .eq('user_id', userId)
+          .then(({ error }) => {
+            if (error) console.warn('[store] app_version update failed:', error.message);
+            else console.info('[store] app_version reported:', ver);
+          });
+      }).catch(() => {});
+    }
 
     // History
     const history: DayEntry[] = (statesRes.data || []).map((d) => {
