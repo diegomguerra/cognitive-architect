@@ -1,14 +1,11 @@
 /**
- * QRingAdapter — Wearable adapter for Colmi R02/R03/R06 ("QRing") smart rings.
+ * QRingAdapter — Production adapter for QRing (Colmi R02) smart ring.
+ * Delegates ALL BLE to native Capacitor plugin `QRingPlugin`.
+ * The front-end NEVER touches BLE directly.
  *
- * Delegates ALL BLE to the native QRingPlugin (Swift/Kotlin). The front-end
- * never touches BLE directly. This class only translates between the native
- * event stream and the shared `WearableAdapter` contract.
- *
- * Protocol reference: colmi.puxtril.com + Gadgetbridge PR #3896
+ * Protocol: Nordic UART (6E40FFF0), 16-byte packets, CRC = sum & 0xFF
  */
 
-import { QRingPlugin, type QRingSyncDataEvent } from './qring-bridge';
 import type {
   WearableAdapter,
   WearableDevice,
@@ -19,23 +16,6 @@ import type {
 } from '../jstyle/wearable.types';
 
 type EventMap = { [K in keyof WearableEvents]: Set<WearableEvents[K]> };
-
-/**
- * Normalize native sample to shared BiomarkerSample format.
- * Native emits `ts` as unix ms, we emit ISO strings to match the rest of the
- * VYR stack (consistent with ingest-biomarker-batch edge function).
- */
-function normalizeSample(raw: QRingSyncDataEvent['samples'][number]): BiomarkerSample {
-  const iso = typeof raw.ts === 'number' ? new Date(raw.ts).toISOString() : String(raw.ts);
-  return {
-    type: raw.type as BiomarkerType,
-    ts: iso,
-    end_ts: raw.end_ts != null ? new Date(raw.end_ts).toISOString() : null,
-    value: raw.value ?? null,
-    payload: raw.raw ? { raw: raw.raw } : undefined,
-    source: 'qring_ble',
-  };
-}
 
 export class QRingAdapter implements WearableAdapter {
   private events: EventMap = {
@@ -48,7 +28,10 @@ export class QRingAdapter implements WearableAdapter {
 
   private connectedDevice: WearableDevice | null = null;
   private _diagnostics: DeviceDiagnostics | null = null;
-  private listenersBound = false;
+
+  private get plugin(): any {
+    return (window as any).Capacitor?.Plugins?.QRingPlugin ?? null;
+  }
 
   private get isNative(): boolean {
     return !!(window as any).Capacitor?.isNativePlatform?.();
@@ -57,65 +40,11 @@ export class QRingAdapter implements WearableAdapter {
   async isAvailable(): Promise<boolean> {
     if (!this.isNative) return false;
     try {
-      const r = await QRingPlugin.isAvailable();
+      const r = await this.plugin?.isAvailable();
       return r?.available === true;
     } catch {
       return false;
     }
-  }
-
-  private async bindListenersOnce(): Promise<void> {
-    if (this.listenersBound) return;
-    this.listenersBound = true;
-
-    await QRingPlugin.addListener('deviceFound', (d) => {
-      this.emit('onDeviceFound', {
-        deviceId: d.deviceId,
-        name: d.name || 'QRing',
-        mac: d.mac,
-        rssi: d.rssi,
-        vendor: d.vendor || 'colmi',
-        model: d.model || 'R02',
-        advertisedServices: d.advertisedServices,
-        overflowServices: d.overflowServices,
-        manufacturerData: d.manufacturerData,
-        looksLikeRing: d.looksLikeRing,
-      });
-    });
-
-    await QRingPlugin.addListener('connected', (d) => {
-      const device: WearableDevice = {
-        deviceId: d.deviceId,
-        name: d.name || 'QRing',
-        mac: d.mac,
-        vendor: 'colmi',
-        model: 'R02',
-      };
-      this.connectedDevice = device;
-      this._diagnostics = { deviceId: d.deviceId, mac: d.mac };
-      this.emit('onConnected', device);
-    });
-
-    await QRingPlugin.addListener('syncData', (ev) => {
-      const samples = (ev.samples ?? []).map(normalizeSample);
-      if (samples.length > 0) {
-        this.emit('onData', ev.type as BiomarkerType, samples);
-      }
-    });
-
-    await QRingPlugin.addListener('syncEnd', (ev) => {
-      this.emit('onSyncEnd', ev.type as BiomarkerType);
-    });
-
-    await QRingPlugin.addListener('battery', (ev) => {
-      if (this._diagnostics) {
-        this._diagnostics = { ...this._diagnostics, battery: ev.battery };
-      }
-    });
-
-    await QRingPlugin.addListener('error', (ev) => {
-      this.emit('onError', ev.code || 'QRING_ERROR', ev.message || 'unknown');
-    });
   }
 
   async scan(): Promise<void> {
@@ -124,33 +53,36 @@ export class QRingAdapter implements WearableAdapter {
       return;
     }
     try {
-      await this.bindListenersOnce();
-      await QRingPlugin.startScan();
+      this.plugin?.addListener?.('deviceFound', (d: WearableDevice) => {
+        this.emit('onDeviceFound', d);
+      });
+      await this.plugin?.startScan();
     } catch (e: any) {
       this.emit('onError', 'SCAN_FAILED', e?.message ?? 'Scan failed');
     }
   }
 
   async stopScan(): Promise<void> {
-    try { await QRingPlugin.stopScan(); } catch { /* silent */ }
+    try { await this.plugin?.stopScan(); } catch { /* silent */ }
   }
 
   async connect(deviceId: string): Promise<boolean> {
     if (!this.isNative) return false;
     try {
-      await this.bindListenersOnce();
-      const r = await QRingPlugin.connect({ deviceId });
+      const r = await this.plugin?.connect({ deviceId });
       if (r?.connected) {
         this.connectedDevice = {
           deviceId,
           name: r.name ?? 'QRing',
           vendor: 'colmi',
-          model: r.model ?? 'R02',
-          mac: r.mac ?? deviceId,
+          model: 'R02',
+          mac: r.mac,
         };
         this._diagnostics = {
           deviceId,
-          mac: r.mac ?? deviceId,
+          mac: r.mac,
+          fwVersion: r.fwVersion,
+          battery: r.battery,
         };
         this.emit('onConnected', this.connectedDevice);
         return true;
@@ -163,9 +95,8 @@ export class QRingAdapter implements WearableAdapter {
   }
 
   async disconnect(): Promise<void> {
-    try { await QRingPlugin.disconnect(); } catch { /* silent */ }
+    try { await this.plugin?.disconnect(); } catch { /* silent */ }
     this.connectedDevice = null;
-    this._diagnostics = null;
   }
 
   async sync(options?: { since?: string }): Promise<void> {
@@ -174,27 +105,27 @@ export class QRingAdapter implements WearableAdapter {
       return;
     }
     try {
-      await this.bindListenersOnce();
-      const r = await QRingPlugin.sync({ since: options?.since });
-      if (r?.fw_version && this._diagnostics) {
-        this._diagnostics = { ...this._diagnostics, fwVersion: r.fw_version };
-      }
-      this.emit('onSyncEnd', 'hr' as BiomarkerType);
+      this.plugin?.addListener?.('syncData', (ev: { type: BiomarkerType; samples: BiomarkerSample[] }) => {
+        this.emit('onData', ev.type, ev.samples);
+      });
+      this.plugin?.addListener?.('syncEnd', (ev: { type: BiomarkerType }) => {
+        this.emit('onSyncEnd', ev.type);
+      });
+      await this.plugin?.sync({ since: options?.since });
     } catch (e: any) {
       this.emit('onError', 'SYNC_FAILED', e?.message ?? 'Sync failed');
     }
   }
 
   async enableRealtime(type: BiomarkerType): Promise<void> {
-    if (type !== 'hr' && type !== 'spo2' && type !== 'hrv') {
-      this.emit('onError', 'REALTIME_UNSUPPORTED_TYPE', `QRing realtime not available for ${type}`);
-      return;
-    }
-    try {
-      await QRingPlugin.enableRealtime({ type });
-    } catch (e: any) {
-      this.emit('onError', 'REALTIME_FAILED', e?.message ?? 'Realtime failed');
-    }
+    try { await this.plugin?.enableRealtime({ type }); }
+    catch (e: any) { this.emit('onError', 'REALTIME_FAILED', e?.message ?? 'Realtime failed'); }
+  }
+
+  /** Configure auto HR measurement interval (1-60 min). Default: 5 min for max data. */
+  async configureAutoHR(intervalMinutes: number = 5, enabled: boolean = true): Promise<void> {
+    try { await this.plugin?.configureAutoHR({ interval: intervalMinutes, enabled }); }
+    catch (e: any) { this.emit('onError', 'CONFIG_FAILED', e?.message ?? 'Config failed'); }
   }
 
   getDiagnostics(): DeviceDiagnostics | null { return this._diagnostics; }
