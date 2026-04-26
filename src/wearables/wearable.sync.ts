@@ -9,6 +9,38 @@ import { wearableStore } from './wearable.store';
 import { wlog, werror, nextRequestId } from './jstyle/wearable.telemetry';
 import type { IngestBatchPayload, IngestBatchResponse, BiomarkerSample } from './jstyle/wearable.types';
 
+/** Biomarker types that have no clean HealthKit mapping — never forwarded. */
+const HK_SKIP_TYPES = new Set<string>(['sleep', 'stress', 'debug_raw']);
+
+/**
+ * Hybrid path: in addition to ingesting via the edge function, also write
+ * biomarker samples to HealthKit so they're visible to Apple Health and any
+ * other native health app on the device. Best-effort — failures don't block
+ * the canonical Supabase ingest. iOS-only (web/Android no-op).
+ *
+ * Reused by ANY wearable adapter (QRing, J-Style, Garmin, Oura) via the
+ * shared `flushSamplesToBackend` flow below.
+ */
+async function writeSamplesToHealthKit(samples: BiomarkerSample[]): Promise<void> {
+  const w = window as { Capacitor?: { isNativePlatform?: () => boolean; Plugins?: Record<string, { saveBiomarkerSamples?: (a: { samples: unknown[] }) => Promise<unknown> }> } };
+  if (!w.Capacitor?.isNativePlatform?.()) return;
+  const bridge = w.Capacitor.Plugins?.VYRHealthBridge;
+  if (!bridge?.saveBiomarkerSamples) return;
+  const filtered = samples.filter((s) => !HK_SKIP_TYPES.has(s.type));
+  if (filtered.length === 0) return;
+  try {
+    const r = (await bridge.saveBiomarkerSamples({ samples: filtered })) as { written?: number; skipped?: number; error?: string };
+    wlog('sync', 'healthkit hybrid write', {
+      written: r?.written ?? 0,
+      skipped: r?.skipped ?? 0,
+      error: r?.error,
+    });
+  } catch (e) {
+    // Permission denied / not authorized — swallow, Supabase ingest already succeeded
+    wlog('sync', 'healthkit hybrid write skipped', { reason: (e as Error)?.message ?? 'unknown' });
+  }
+}
+
 const LS_LAST_QRING_DEVICE = 'vyr.qring.lastDeviceId';
 const LS_LAST_QRING_NAME = 'vyr.qring.lastDeviceName';
 
@@ -64,6 +96,10 @@ export async function flushSamplesToBackend(): Promise<IngestBatchResponse | nul
     duplicates: result.duplicates,
     errors: result.errors,
   });
+
+  // Hybrid: also forward to HealthKit so native apps see the data.
+  // Doesn't block — fires after Supabase ingest succeeds.
+  void writeSamplesToHealthKit(allSamples);
 
   wearableStore.markFlushed();
   return result;

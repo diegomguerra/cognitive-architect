@@ -28,9 +28,29 @@ export class QRingAdapter implements WearableAdapter {
 
   private connectedDevice: WearableDevice | null = null;
   private _diagnostics: DeviceDiagnostics | null = null;
+  private _diagnosticsListenersAttached = false;
 
   private get plugin(): any {
     return (window as any).Capacitor?.Plugins?.QRingPlugin ?? null;
+  }
+
+  /** Attach battery + firmware listeners once. Plugin emits these
+   *  asynchronously after connect (battery during sync, fw on char read). */
+  private attachDiagnosticsListeners(): void {
+    if (this._diagnosticsListenersAttached) return;
+    const p = this.plugin;
+    if (!p?.addListener) return;
+    p.addListener('battery', (ev: { battery?: number; charging?: boolean }) => {
+      if (this._diagnostics && typeof ev?.battery === 'number') {
+        this._diagnostics = { ...this._diagnostics, battery: ev.battery };
+      }
+    });
+    p.addListener('firmwareRev', (ev: { fwVersion?: string }) => {
+      if (this._diagnostics && ev?.fwVersion) {
+        this._diagnostics = { ...this._diagnostics, fwVersion: ev.fwVersion };
+      }
+    });
+    this._diagnosticsListenersAttached = true;
   }
 
   private get isNative(): boolean {
@@ -69,20 +89,23 @@ export class QRingAdapter implements WearableAdapter {
   async connect(deviceId: string): Promise<boolean> {
     if (!this.isNative) return false;
     try {
+      this.attachDiagnosticsListeners();
       const r = await this.plugin?.connect({ deviceId });
       if (r?.connected) {
         this.connectedDevice = {
           deviceId,
           name: r.name ?? 'QRing',
           vendor: 'colmi',
-          model: 'R02',
+          model: r.model ?? 'R02',
           mac: r.mac,
         };
+        // fwVersion + battery arrive asynchronously via 'firmwareRev' / 'battery'
+        // events the plugin fires post-connect — listeners above merge them in.
         this._diagnostics = {
           deviceId,
           mac: r.mac,
           fwVersion: r.fwVersion,
-          battery: r.battery,
+          battery: typeof r.battery === 'number' ? r.battery : undefined,
         };
         this.emit('onConnected', this.connectedDevice);
         return true;

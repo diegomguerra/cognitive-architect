@@ -24,6 +24,7 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "loadConnectionState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "resetAnchors", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readByDate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveBiomarkerSamples", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -263,6 +264,97 @@ public class VYRHealthBridge: CAPPlugin, CAPBridgedPlugin {
         let sample = HKQuantitySample(type: type, quantity: HKQuantity(unit: HKUnit.kilocalorie(), doubleValue: value), start: startDate, end: endDate)
         healthStore.save(sample) { success, error in
             if success { call.resolve(["success": true]) } else { call.reject(error?.localizedDescription ?? "HealthKit write error") }
+        }
+    }
+
+    /// Hybrid path: write a batch of biomarker samples produced by a wearable
+    /// adapter (QRing BLE, J-Style, Garmin, Oura) directly into HealthKit so
+    /// they're visible to Apple Health and any other native health app.
+    /// Same canonical samples that go to Supabase via ingest-biomarker-batch.
+    /// Caller passes our biomarker type names ("hr","hrv","spo2","steps","temp",
+    /// "rhr"). Sleep + stress + debug_raw are skipped (no clean HK mapping).
+    /// `ts` accepts ISO-8601 string or epoch-ms number.
+    @objc func saveBiomarkerSamples(_ call: CAPPluginCall) {
+        guard let raw = call.getArray("samples") as? [[String: Any]] else {
+            call.reject("samples array required")
+            return
+        }
+        let isoFmt = ISO8601DateFormatter()
+        isoFmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoFmtNoFrac = ISO8601DateFormatter()
+        func parseDate(_ v: Any?) -> Date? {
+            if let s = v as? String {
+                return isoFmt.date(from: s) ?? isoFmtNoFrac.date(from: s)
+            }
+            if let ms = v as? Double { return Date(timeIntervalSince1970: ms / 1000.0) }
+            if let n = v as? NSNumber { return Date(timeIntervalSince1970: n.doubleValue / 1000.0) }
+            return nil
+        }
+        var hkSamples: [HKObject] = []
+        for s in raw {
+            guard let typeStr = s["type"] as? String else { continue }
+            guard let value = (s["value"] as? Double) ?? (s["value"] as? NSNumber)?.doubleValue else { continue }
+            guard let start = parseDate(s["ts"]) else { continue }
+            let end = parseDate(s["end_ts"]) ?? start
+            if let obj = mapBiomarkerToHK(type: typeStr, value: value, start: start, end: end) {
+                hkSamples.append(obj)
+            }
+        }
+        guard !hkSamples.isEmpty else {
+            call.resolve(["written": 0, "skipped": raw.count])
+            return
+        }
+        healthStore.save(hkSamples) { success, error in
+            if success {
+                call.resolve(["written": hkSamples.count, "skipped": raw.count - hkSamples.count])
+            } else {
+                // Partial failures are common when only a subset of types is authorized.
+                // Don't fail the whole batch — surface the error string for telemetry.
+                call.resolve([
+                    "written": 0,
+                    "skipped": raw.count,
+                    "error": error?.localizedDescription ?? "HealthKit save failed"
+                ])
+            }
+        }
+    }
+
+    private func mapBiomarkerToHK(type: String, value: Double, start: Date, end: Date) -> HKObject? {
+        switch type {
+        case "hr":
+            guard let t = HKObjectType.quantityType(forIdentifier: .heartRate) else { return nil }
+            guard (30...220).contains(value) else { return nil }
+            let unit = HKUnit.count().unitDivided(by: HKUnit.minute())
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: start, end: end)
+        case "rhr":
+            guard let t = HKObjectType.quantityType(forIdentifier: .restingHeartRate) else { return nil }
+            guard (30...120).contains(value) else { return nil }
+            let unit = HKUnit.count().unitDivided(by: HKUnit.minute())
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: start, end: end)
+        case "hrv":
+            guard let t = HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN) else { return nil }
+            guard (5...250).contains(value) else { return nil }
+            let unit = HKUnit.secondUnit(with: .milli)
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: unit, doubleValue: value), start: start, end: end)
+        case "spo2":
+            guard let t = HKObjectType.quantityType(forIdentifier: .oxygenSaturation) else { return nil }
+            // Accept 0-100 (percent) or 0.0-1.0 (fraction) and normalize to fraction
+            let frac = value > 1.0 ? value / 100.0 : value
+            guard (0.5...1.0).contains(frac) else { return nil }
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: .percent(), doubleValue: frac), start: start, end: end)
+        case "steps":
+            guard let t = HKObjectType.quantityType(forIdentifier: .stepCount) else { return nil }
+            guard value > 0, value < 100000 else { return nil }
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: .count(), doubleValue: value), start: start, end: end)
+        case "temp":
+            guard let t = HKObjectType.quantityType(forIdentifier: .bodyTemperature) else { return nil }
+            guard (30...45).contains(value) else { return nil }
+            return HKQuantitySample(type: t, quantity: HKQuantity(unit: HKUnit.degreeCelsius(), doubleValue: value), start: start, end: end)
+        // sleep needs HKCategorySample with stage values; stress/debug_raw have no HK mapping
+        case "sleep", "stress", "debug_raw":
+            return nil
+        default:
+            return nil
         }
     }
 

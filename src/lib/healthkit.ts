@@ -38,6 +38,10 @@ export const BRIDGE_READ_TYPES = [
 // Types handled exclusively by the Swift bridge for writes
 export const BRIDGE_ONLY_WRITE_TYPES = [
   'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic',
+  // Hybrid path: QRing/J-Style/Garmin/Oura BLE samples are written into
+  // HealthKit via VYRHealthBridge.saveBiomarkerSamples. Need WRITE auth on
+  // top of the existing READ in BRIDGE_READ_TYPES.
+  'restingHeartRate', 'heartRateVariability', 'oxygenSaturation',
 ] as const;
 
 // All types for background delivery (plugin + bridge)
