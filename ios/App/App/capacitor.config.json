@@ -13,6 +13,7 @@
 	},
 	"packageClassList": [
 		"AppPlugin",
+		"PushNotificationsPlugin",
 		"HealthPlugin"
 	]
 }
