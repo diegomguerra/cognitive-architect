@@ -5,21 +5,24 @@
  * HealthKit permissions. Both data paths get activated together.
  *
  * Two complementary data paths run after pairing:
- *   1. BLE direct (QRingPlugin) → Supabase + HealthKit. Raw notify bytes
- *      captured for parser improvement; samples written to both stores.
+ *   1. BLE direct (QRingPlugin → wearableStore → ingest-biomarker-batch).
+ *      Raw notify bytes captured for parser improvement; samples written to
+ *      Supabase + HealthKit (hybrid forward in wearable.sync.ts).
  *   2. HealthKit reads → VYR. Pulls normalized cross-source data (official
  *      ring app, Apple Watch, Garmin, etc.) for VYR State computation.
- *
- * They complement each other: BLE gives high-frequency raw data, HealthKit
- * gives normalized cross-vendor data. Until we standardize ring parsers,
- * HealthKit is the safety net for VYR State.
  */
 
 import { useEffect, useState } from 'react';
 import { Bluetooth, Heart, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
-import { qringStore, type QRingDevice } from './qring/qring.store';
+import { wearableStore } from './wearable.store';
+import {
+  flushSamplesToBackend,
+  rememberPairedQRing,
+  forgetPairedQRing,
+} from './wearable.sync';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
+import type { WearableDevice } from './jstyle/wearable.types';
 
 type FlowStep =
   | 'idle'
@@ -39,32 +42,30 @@ export default function RingPairingFlow() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  const ringStore = qringStore.getState();
+  const ringState = wearableStore.getState();
   const vyr = useVYRStore();
   const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = vyr;
 
-  // Subscribe to ring store changes
-  useEffect(() => qringStore.subscribe(() => forceUpdate((n) => n + 1)), []);
+  useEffect(() => wearableStore.subscribe(() => forceUpdate((n) => n + 1)), []);
 
   // Auto-advance: when ring becomes connected during 'connecting-ring', go to health
   useEffect(() => {
-    if (step === 'connecting-ring' && ringStore.connectedDevice) {
+    if (step === 'connecting-ring' && ringState.connectedDevice) {
       void runHealthStep();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, ringStore.connectedDevice]);
+  }, [step, ringState.connectedDevice]);
 
   // Auto-stop scan after timeout
   useEffect(() => {
     if (step !== 'scanning') return;
     const t = setTimeout(() => {
-      // If still scanning and we have devices, advance to picking; else error
-      const s = qringStore.getState();
+      const s = wearableStore.getState();
       if (s.devices.length > 0) {
-        void qringStore.stopScan();
+        void wearableStore.stopScan();
         setStep('picking');
       } else {
-        void qringStore.stopScan();
+        void wearableStore.stopScan();
         setStep('error');
         setErrorMsg('Nenhum anel encontrado. Verifique se o anel está ligado e próximo.');
       }
@@ -72,7 +73,7 @@ export default function RingPairingFlow() {
     return () => clearTimeout(t);
   }, [step]);
 
-  const ringConnected = !!ringStore.connectedDevice;
+  const ringConnected = !!ringState.connectedDevice;
   const healthActive = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
   const fullyOnboarded = ringConnected && healthActive;
 
@@ -81,8 +82,9 @@ export default function RingPairingFlow() {
   async function startFlow() {
     setErrorMsg(null);
     setStep('scanning');
-    const ok = await qringStore.scan();
-    if (!ok) {
+    try {
+      await wearableStore.scan();
+    } catch {
       setStep('error');
       setErrorMsg('Bluetooth indisponível. Habilite o Bluetooth nos ajustes.');
     }
@@ -90,12 +92,17 @@ export default function RingPairingFlow() {
 
   async function pickDevice(deviceId: string) {
     setStep('connecting-ring');
-    const ok = await qringStore.connect(deviceId);
+    const ok = await wearableStore.connect(deviceId);
     if (!ok) {
       setStep('error');
       setErrorMsg('Não conseguimos conectar ao anel. Tente novamente.');
+      return;
     }
-    // success → useEffect transitions to runHealthStep
+    // Persist deviceId to localStorage so admin-triggered syncs can find it
+    // via runQRingSyncIfPaired() (caminho compartilhado, evita "no_paired_device").
+    const dev = wearableStore.getState().connectedDevice;
+    if (dev) rememberPairedQRing(dev.deviceId, dev.name);
+    // useEffect transitions to runHealthStep
   }
 
   async function runHealthStep() {
@@ -105,29 +112,57 @@ export default function RingPairingFlow() {
       // Ring is connected but HealthKit denied/unavailable. We still consider
       // the flow successful — BLE path runs alone. User can retry HK later.
       toast.info('Apple Health não foi liberado. Você pode liberar depois nos ajustes.');
+      // Run a first BLE sync anyway so we have something to work with
+      await runFirstBleSync();
       setStep('done');
       return;
     }
     // First sync (HK incremental) already runs inside connectWearable.
-    // Now also run a BLE sync so we have parity from minute one.
+    // Now also run a BLE sync + flush so amostras chegam ao banco.
     setStep('syncing-first');
-    try {
-      await qringStore.sync();
-    } catch (e) {
-      // BLE sync may fail silently for many reasons (ring busy, range) —
-      // not fatal for the onboarding completion.
-      console.warn('[ring-pairing] First BLE sync failed:', (e as Error)?.message);
-    }
+    await runFirstBleSync();
     setStep('done');
     toast.success('Anel + Apple Health conectados');
   }
 
+  /** Runs a BLE sync via wearableStore (which accumulates samples in
+   *  pendingSamples), then immediately flushes to Supabase via the edge
+   *  function. Best-effort — failures don't block onboarding completion. */
+  async function runFirstBleSync(): Promise<void> {
+    try {
+      await wearableStore.sync();
+      const total = Array.from(wearableStore.getState().pendingSamples.values())
+        .reduce((sum, arr) => sum + arr.length, 0);
+      if (total > 0) {
+        await flushSamplesToBackend();
+      }
+    } catch (e) {
+      console.warn('[ring-pairing] First BLE sync failed:', (e as Error)?.message);
+    }
+  }
+
   async function handleSyncAll() {
     setSyncing(true);
-    const [bleOk, hkOk] = await Promise.all([
-      qringStore.sync().then(() => true).catch(() => false),
-      syncWearable().catch(() => false),
-    ]);
+    let bleOk = false;
+    let hkOk = false;
+    // BLE sync — pendingSamples gets populated, then flush to backend
+    try {
+      await wearableStore.sync();
+      const total = Array.from(wearableStore.getState().pendingSamples.values())
+        .reduce((sum, arr) => sum + arr.length, 0);
+      if (total > 0) {
+        await flushSamplesToBackend();
+      }
+      bleOk = true;
+    } catch (e) {
+      console.warn('[ring-pairing] BLE sync failed:', (e as Error)?.message);
+    }
+    // HealthKit sync — uses VYR store flow (also recomputes state)
+    try {
+      hkOk = await syncWearable();
+    } catch {
+      hkOk = false;
+    }
     setSyncing(false);
     if (bleOk && hkOk) toast.success('Sincronizado: anel + Apple Health');
     else if (bleOk) toast.info('Anel sincronizado, Apple Health falhou');
@@ -136,29 +171,28 @@ export default function RingPairingFlow() {
   }
 
   async function handleDisconnect() {
-    await Promise.all([qringStore.disconnect(), disconnectWearable()]);
+    forgetPairedQRing();
+    await Promise.all([wearableStore.disconnect(), disconnectWearable()]);
     setStep('idle');
     toast.success('Desconectado');
   }
 
   // ---- Render ----
 
-  // FULLY CONNECTED — status card with both paths
   if (fullyOnboarded) {
     return <ConnectedCard
-      device={ringStore.connectedDevice!}
-      battery={ringStore.battery}
-      lastSyncAt={wearableConnection?.lastSyncAt ?? ringStore.lastSyncAt}
+      device={ringState.connectedDevice!}
+      battery={ringState.diagnostics?.battery ?? null}
+      lastSyncAt={wearableConnection?.lastSyncAt ?? ringState.lastSyncAt}
       onSync={handleSyncAll}
       onDisconnect={handleDisconnect}
       syncing={syncing}
     />;
   }
 
-  // PARTIAL — only one path is active
   if (ringConnected || healthActive) {
     return <PartialCard
-      device={ringStore.connectedDevice}
+      device={ringState.connectedDevice}
       ringConnected={ringConnected}
       healthActive={healthActive}
       onCompleteHealth={runHealthStep}
@@ -170,7 +204,6 @@ export default function RingPairingFlow() {
     />;
   }
 
-  // IDLE / IN-PROGRESS — onboarding card
   return (
     <div className="rounded-2xl bg-card border border-border p-4 space-y-4">
       <div className="flex items-center gap-3">
@@ -217,8 +250,8 @@ export default function RingPairingFlow() {
 
       {step === 'picking' && (
         <div className="space-y-2">
-          <p className="text-[11px] text-muted-foreground">Encontramos {ringStore.devices.length} dispositivo{ringStore.devices.length === 1 ? '' : 's'}. Selecione seu anel:</p>
-          {ringStore.devices.map((d) => (
+          <p className="text-[11px] text-muted-foreground">Encontramos {ringState.devices.length} dispositivo{ringState.devices.length === 1 ? '' : 's'}. Selecione seu anel:</p>
+          {ringState.devices.map((d) => (
             <button
               key={d.deviceId}
               onClick={() => pickDevice(d.deviceId)}
@@ -227,10 +260,9 @@ export default function RingPairingFlow() {
               <div className="text-left">
                 <p className="text-xs font-medium text-foreground">
                   {d.name}
-                  {d.saved && <span className="text-[10px] text-muted-foreground ml-1">(salvo)</span>}
                 </p>
                 <p className="text-[10px] text-muted-foreground">
-                  {d.rssi != null && d.rssi !== 0 && `${d.rssi} dBm · `}{d.model}
+                  {d.model}
                 </p>
               </div>
               <span className="text-xs font-medium" style={{ color: 'hsl(var(--vyr-accent-stable))' }}>
@@ -291,7 +323,7 @@ function ConnectedCard({
   onDisconnect,
   syncing,
 }: {
-  device: QRingDevice;
+  device: WearableDevice;
   battery: number | null;
   lastSyncAt: string | null;
   onSync: () => void;
@@ -356,7 +388,7 @@ function PartialCard({
   syncing,
   step,
 }: {
-  device: QRingDevice | null;
+  device: WearableDevice | null;
   ringConnected: boolean;
   healthActive: boolean;
   onCompleteHealth: () => void;
