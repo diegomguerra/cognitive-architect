@@ -177,22 +177,52 @@ Deno.serve(async (req) => {
     }),
   );
 
-  // 7. Bulk upsert in chunks
+  // 7. Insert in chunks — resilient strategy:
+  //
+  // (a) Try bulk INSERT first. Fast path when all rows are new.
+  // (b) On any error, fall back to per-row insert. Treat error code 23505
+  //     (unique_violation) as a duplicate (silently skip), anything else as
+  //     a real error. This handles BOTH unique indexes that exist on the
+  //     biomarker_samples table:
+  //       - biomarker_raw_hash_unique  (PARTIAL: WHERE raw_hash IS NOT NULL)
+  //       - biomarker_dedup_hc         (EXPRESSION on user_id,type,ts,COALESCE(source,'unknown'))
+  //
+  // We do NOT use upsert(onConflict:"raw_hash") because Postgres rejects
+  // ON CONFLICT against partial indexes — the chunk fails entirely and
+  // ALL samples in the chunk are lost (regression caught 2026-04-26).
   const CHUNK_SIZE = 50;
+  const sampleErrors: string[] = [];
   for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
     const chunk = rows.slice(i, i + CHUNK_SIZE);
-    const { data, error } = await supabase
+
+    const bulk = await supabase
       .from("biomarker_samples")
-      .upsert(chunk, { onConflict: "raw_hash", ignoreDuplicates: true })
+      .insert(chunk)
       .select("id, type");
 
-    if (error) {
-      console.error("Chunk insert error:", error.message);
-      errors += chunk.length;
-    } else {
-      inserted += (data?.length ?? 0);
-      duplicates += chunk.length - (data?.length ?? 0);
-      data?.forEach((r: { type: string }) => typesIngested.add(r.type));
+    if (!bulk.error) {
+      inserted += bulk.data?.length ?? 0;
+      bulk.data?.forEach((r: { type: string }) => typesIngested.add(r.type));
+      continue;
+    }
+
+    // Bulk failed — likely a duplicate in the chunk. Retry per-row.
+    for (const row of chunk) {
+      const single = await supabase
+        .from("biomarker_samples")
+        .insert(row)
+        .select("id, type");
+      if (!single.error) {
+        inserted += 1;
+        if (single.data?.[0]) typesIngested.add(single.data[0].type);
+      } else if (single.error.code === "23505" || /duplicate key/i.test(single.error.message)) {
+        duplicates += 1;
+      } else {
+        errors += 1;
+        if (sampleErrors.length < 5) {
+          sampleErrors.push(`${row.type}@${row.ts}: ${single.error.message}`);
+        }
+      }
     }
   }
 
@@ -211,7 +241,11 @@ Deno.serve(async (req) => {
       device_id: deviceId,
       last_sync_at: new Date().toISOString(),
       last_success_at: errors === 0 ? new Date().toISOString() : undefined,
-      last_error: errors > 0 ? `${errors} samples failed` : null,
+      last_error: errors > 0
+        ? (sampleErrors.length > 0
+            ? sampleErrors.slice(0, 3).join(" | ")
+            : `${errors} samples failed`)
+        : null,
       cursor_by_type: cursorByType,
     },
     { onConflict: "user_id,device_id" },
