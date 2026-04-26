@@ -1,13 +1,13 @@
-VYR 8.0(23) — Coleta híbrida BLE + Apple Health
+VYR 8.0(101) — Registro 24/7 + coleta híbrida BLE/HealthKit
 
 Novidades:
-- Anel QRing/R09 agora envia cada amostra simultaneamente para o servidor VYR e para o Apple Health (HealthKit). Outros apps de saúde nativos veem os dados sem conflito.
-- Tipos cobertos no envio para o Apple Health: HR, RHR, HRV, SpO2, passos, temperatura.
-- Captura "debug_raw" restaurada em todo notify BLE (V1 e V2) — habilita conserto do parser de histórico do R09 a partir do dado real de campo.
-- Canal V2 "big data" (temperatura R09) restaurado após regressão.
-- Reconectar anel pareado mais rápido (deviceId persistido + autoConnect ativo).
-- Sync agora segue fluxo realtime-first: tempo, bateria, temperatura V2 e leituras realtime HR/SpO2/HRV. Histórico V1 mantido desligado por flag até parser ser corrigido.
+- Registro de dose e percepção liberado a qualquer hora do dia. Você não precisa mais respeitar a janela horária da fase para registrar.
+- Janelas de fase agora são apenas referência visual (BOOT 05h–11h59, HOLD 12h–17h59, CLEAR 18h–04h59). Mesma definição em iOS e Android.
 
-Correções:
-- iOS QRingPlugin: filtros fisiológicos antes de gravar no HealthKit (rejeita HR<30 / >220, SpO2<50%, etc.) — evita lixo no Apple Health.
-- Permissões de escrita no HealthKit já incluem RHR/HRV/SpO2 desde a primeira solicitação.
+Anel QRing/R09:
+- Cada amostra coletada via Bluetooth (HR, RHR, HRV, SpO2, passos, temperatura) também é gravada no Apple Health automaticamente.
+- Captura "debug_raw" restaurada em todo notify BLE — habilita conserto do parser de histórico do R09 a partir de dado real.
+- Canal V2 "big data" (temperatura R09) restaurado.
+- Reconectar anel pareado mais rápido (deviceId persistido + autoConnect ativo).
+
+Filtros fisiológicos antes de gravar no HealthKit (rejeita HR<30/>220, SpO2<50%, etc.) — evita lixo no Apple Health.
