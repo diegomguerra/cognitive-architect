@@ -1,9 +1,13 @@
-QRing agora puxa temperatura do anel R09 + snapshot em tempo real de HR, SpO2 e HRV a cada Sync.
+VYR 8.0(23) — Coleta híbrida BLE + Apple Health
 
 Novidades:
-- Temperatura histórica capturada via novo canal V2 "big data" (exclusivo R09)
-- Leituras reais de HR, SpO2 e HRV (modo realtime, 10s cada) em cada sync
-- Parser de histórico antigo foi desativado enquanto reverte engenharia para R09 — nada de valor errado chegando ao dashboard
-- Todo pacote BLE recebido vai também como debug_raw (silencioso) para acelerar correção do parser
+- Anel QRing/R09 agora envia cada amostra simultaneamente para o servidor VYR e para o Apple Health (HealthKit). Outros apps de saúde nativos veem os dados sem conflito.
+- Tipos cobertos no envio para o Apple Health: HR, RHR, HRV, SpO2, passos, temperatura.
+- Captura "debug_raw" restaurada em todo notify BLE (V1 e V2) — habilita conserto do parser de histórico do R09 a partir do dado real de campo.
+- Canal V2 "big data" (temperatura R09) restaurado após regressão.
+- Reconectar anel pareado mais rápido (deviceId persistido + autoConnect ativo).
+- Sync agora segue fluxo realtime-first: tempo, bateria, temperatura V2 e leituras realtime HR/SpO2/HRV. Histórico V1 mantido desligado por flag até parser ser corrigido.
 
-Para usuários sem anel: fluxo igual ao anterior (HealthKit continua normal).
+Correções:
+- iOS QRingPlugin: filtros fisiológicos antes de gravar no HealthKit (rejeita HR<30 / >220, SpO2<50%, etc.) — evita lixo no Apple Health.
+- Permissões de escrita no HealthKit já incluem RHR/HRV/SpO2 desde a primeira solicitação.
