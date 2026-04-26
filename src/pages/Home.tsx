@@ -10,16 +10,9 @@ import ConnectionStatusPill from '@/components/ConnectionStatusPill';
 import BottomNav from '@/components/BottomNav';
 import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
+import { getActiveDosePhase } from '@/lib/vyr-engine';
 import { useVYRStore } from '@/hooks/useVYRStore';
 // Fase activa de dose — UMA fase por janela horária
-function getActiveDosePhase(): 'BOOT' | 'HOLD' | 'CLEAR' | null {
-  const h = new Date().getHours();
-  if (h >= 5 && h < 12) return 'BOOT';
-  if (h >= 12 && h < 18) return 'HOLD';
-  if (h >= 18 && h < 24) return 'CLEAR';
-  return null; // 00h–04h59 — sem dose
-}
-
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h >= 5 && h < 12) return 'Bom dia';

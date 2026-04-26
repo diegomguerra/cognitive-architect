@@ -316,18 +316,29 @@ export interface PhaseTimeWindow {
 }
 
 export function getPhaseTimeWindow(phase: string): PhaseTimeWindow {
+  // Labels are display-only ("BOOT corresponds to morning hours"). Registration
+  // is 24/7 — no enforcement. Aligned with android-vyr-app for parity.
   switch (phase) {
-    case 'BOOT': return { start: 5, end: 12, label: '05h–11h59' };
-    case 'HOLD': return { start: 12, end: 18, label: '12h–17h59' };
-    case 'CLEAR': return { start: 18, end: 22, label: '18h–22h' };
-    default: return { start: 0, end: 24, label: '00h–24h' };
+    case 'BOOT':  return { start: 5,  end: 12, label: '05h–11h59' };
+    case 'HOLD':  return { start: 12, end: 18, label: '12h–17h59' };
+    case 'CLEAR': return { start: 18, end: 29, label: '18h–04h59' };
+    default:      return { start: 0,  end: 24, label: '00h–24h' };
   }
 }
 
-export function isPhaseActive(phase: string): boolean {
-  const hour = new Date().getHours();
-  const window = getPhaseTimeWindow(phase);
-  return hour >= window.start && hour < window.end;
+/** 24/7 registration: any phase is always registerable, regardless of clock. */
+export function isPhaseActive(_phase: string): boolean {
+  return true;
+}
+
+/** Returns the suggested phase based on time of day (BOOT/HOLD/CLEAR). Never null. */
+export function getActiveDosePhase(): 'BOOT' | 'HOLD' | 'CLEAR' {
+  return getCurrentPhase();
+}
+
+/** 24/7 registration: always within window. */
+export function isWithinProtocolWindow(): boolean {
+  return true;
 }
 
 /**
