@@ -1,13 +1,15 @@
-VYR 8.0(101) — Registro 24/7 + coleta híbrida BLE/HealthKit
+VYR 8.0(102) — Conexão unificada: anel + Apple Health em uma autorização
 
-Novidades:
-- Registro de dose e percepção liberado a qualquer hora do dia. Você não precisa mais respeitar a janela horária da fase para registrar.
-- Janelas de fase agora são apenas referência visual (BOOT 05h–11h59, HOLD 12h–17h59, CLEAR 18h–04h59). Mesma definição em iOS e Android.
+Antes: dois cards separados em Integrações (Apple Health + QRing BLE) — usuário conectava cada um separadamente, confuso. Agora: um único card "Conectar seu anel ao VYR" orquestra tudo.
 
-Anel QRing/R09:
-- Cada amostra coletada via Bluetooth (HR, RHR, HRV, SpO2, passos, temperatura) também é gravada no Apple Health automaticamente.
-- Captura "debug_raw" restaurada em todo notify BLE — habilita conserto do parser de histórico do R09 a partir de dado real.
-- Canal V2 "big data" (temperatura R09) restaurado.
-- Reconectar anel pareado mais rápido (deviceId persistido + autoConnect ativo).
+Como funciona agora:
+1. Toque em Conectar agora — buscamos seu anel via Bluetooth
+2. Selecione seu anel da lista
+3. Aceite as permissões do Apple Health
+4. Pronto — anel + Apple Health ativos
 
-Filtros fisiológicos antes de gravar no HealthKit (rejeita HR<30/>220, SpO2<50%, etc.) — evita lixo no Apple Health.
+Duas vias rodando em paralelo:
+- Anel via Bluetooth: coleta direta de FC, HRV, SpO2, passos e temperatura para envio ao VYR (alta frequência, dados brutos).
+- Apple Health: dados normalizados de qualquer fonte (anel, Apple Watch, Garmin) para cálculo do VYR State.
+
+Botão "Sincronizar tudo" dispara as duas vias simultaneamente.
