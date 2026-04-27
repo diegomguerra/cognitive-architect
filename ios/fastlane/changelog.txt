@@ -1,10 +1,10 @@
-VYR 8.0(103) — Sincronização BLE chega ao servidor
+VYR 8.0(104) — Coleta BLE mais agressiva pra contornar drain do app oficial
 
-Antes: ao parear o anel o app mostrava "Anel BLE ativo" mas as amostras coletadas via Bluetooth não chegavam ao servidor (ficavam só em memória local). VYR State funcionava com Apple Health, mas dados brutos do anel sumiam.
+Descoberta de ontem: o app oficial do anel (QRing/Colmi) drena+esvazia o anel a cada sincronização BLE. Quem usa os dois apps simultaneamente acabava com Apple Health cheio e dados brutos via Bluetooth do VYR vazios.
 
-Agora:
-- Toda sincronização BLE empurra as amostras para o servidor (ingest-biomarker-batch v34) imediatamente.
-- Sincronização disparada do admin volta a funcionar (deviceId persistido em localStorage além do UserDefaults nativo).
-- Caminho híbrido completo: anel → BLE → Supabase + Apple Health.
+3 mudanças pra contornar:
+- Ao parear, VYR já configura o anel pra gravar FC a cada 5 min (vs ~30 min padrão). Mais amostras acumuladas, mais chance de capturar antes do oficial drenar.
+- Cada vez que o VYR vira ativo (foreground), dispara automaticamente uma sincronização BLE — pega o que o anel acumulou desde a última sync.
+- Card de Integrações agora avisa: se você usa o app oficial do anel, mantenha-o fechado entre uma sync e outra do VYR pra coleta bruta completa.
 
-Continue usando "Conectar agora" em Integrações para parear, e "Sincronizar tudo" para forçar uma coleta.
+Fluxo Apple Health (FC, RHR, HRV, sono, passos) continua igual.
