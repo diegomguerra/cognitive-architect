@@ -140,6 +140,18 @@ export function setupAppLifecycleListeners(onSyncComplete?: () => void): void {
           const ok = await bootstrapHealthSync();
           if (ok && onSyncComplete) onSyncComplete();
         }
+        // Drain workaround (2026-04-26): the official QRing/Colmi app drains
+        // the ring's storage to Apple Health on every sync, leaving VYR's BLE
+        // path empty. Foreground-trigger BLE sync to catch ring data before
+        // the official app drains it next. Best-effort, silent on no-paired.
+        try {
+          const summary = await runQRingSyncIfPaired();
+          if (summary.ran) {
+            console.info('[health-lifecycle] foreground QRing sync:', summary);
+          }
+        } catch (e) {
+          console.warn('[health-lifecycle] foreground QRing sync threw (non-fatal):', e);
+        }
       });
 
       App.addListener('pause', () => {

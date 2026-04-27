@@ -102,6 +102,14 @@ export default function RingPairingFlow() {
     // via runQRingSyncIfPaired() (caminho compartilhado, evita "no_paired_device").
     const dev = wearableStore.getState().connectedDevice;
     if (dev) rememberPairedQRing(dev.deviceId, dev.name);
+    // Drain workaround: force the ring to record HR every 5 min (vs default
+    // 30 min). Faster accumulation = more chances of VYR catching samples
+    // before the official QRing app drains the ring on its next sync.
+    try {
+      await wearableStore.adapter.configureAutoHR(5, true);
+    } catch (e) {
+      console.warn('[ring-pairing] configureAutoHR failed (non-fatal):', (e as Error)?.message);
+    }
     // useEffect transitions to runHealthStep
   }
 
@@ -220,13 +228,19 @@ export default function RingPairingFlow() {
         <div className="flex items-start gap-2">
           <Bluetooth size={14} className="text-muted-foreground mt-0.5 shrink-0" />
           <p className="text-[11px] text-muted-foreground leading-relaxed">
-            <span className="text-foreground font-medium">Anel via Bluetooth</span> — coleta direta de FC, HRV, SpO₂, passos e temperatura, sem depender do app oficial do anel.
+            <span className="text-foreground font-medium">Anel via Bluetooth</span> — coleta direta de FC, HRV, SpO₂, passos e temperatura.
           </p>
         </div>
         <div className="flex items-start gap-2">
           <Heart size={14} className="text-muted-foreground mt-0.5 shrink-0" />
           <p className="text-[11px] text-muted-foreground leading-relaxed">
             <span className="text-foreground font-medium">Apple Health</span> — calcula seu VYR State usando dados normalizados de qualquer fonte (anel, Apple Watch, Garmin).
+          </p>
+        </div>
+        <div className="flex items-start gap-2 pt-1">
+          <AlertCircle size={12} className="text-muted-foreground mt-0.5 shrink-0" />
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Se você usa o app oficial do anel, ele drena os dados a cada sincronização. Pra dados brutos completos via Bluetooth no VYR, mantenha o app oficial fechado entre uma sync e outra.
           </p>
         </div>
       </div>
