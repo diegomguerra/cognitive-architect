@@ -1,7 +1,5 @@
-VYR 8.0(106) — Fix do build 105
+VYR 8.0(107) — Fix tela Integrações que não abria
 
-A 105 saiu com o web bundle desatualizado por engano (cap sync ios não foi executado antes do archive). O painel "Diagnóstico BLE" não apareceu porque o web bundle dentro do IPA era de uma build mais antiga.
+A 8.0(106) introduziu o painel "Diagnóstico BLE" mas o componente podia crashar a tela inteira ao registrar listener Bluetooth (caso o Capacitor ou plugin não estivessem 100% prontos no momento da renderização).
 
-Esta versão corrige isso. Ao abrir Integrações você verá:
-- Card de Pareamento BLE (sem mais menção a Apple Health na UI)
-- Painel "Diagnóstico BLE" logo abaixo, mostrando bytes brutos do anel em tempo real (writesSent, notifiesReceived, last write hex, last notify hex, services e characteristics descobertos).
+Esta versão protege todo o painel com try/catch + checagens de tipo, então mesmo se o plugin estiver indisponível por uma fração de segundo a página de Integrações abre normalmente. O painel mostra placeholder até receber o primeiro evento BLE.

@@ -2,12 +2,12 @@
  * BLEDebugPanel — Live BLE diagnostic panel for QRing.
  *
  * Subscribes to the QRingPlugin's `debug` event and renders raw BLE
- * counters + last hex packets in real time. Useful for tester-side
- * diagnosis of why samples aren't arriving (write count, notify
- * count, last error, discovered services/characteristics).
+ * counters + last hex packets in real time. Safe-guarded against
+ * runtime errors (Capacitor not loaded, plugin missing, listener
+ * registration failures) — never crashes the page.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
 
 interface DebugState {
@@ -33,32 +33,64 @@ const initialDebug: DebugState = {
 export default function BLEDebugPanel() {
   const [debug, setDebug] = useState<DebugState>(initialDebug);
   const [hasReceived, setHasReceived] = useState(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    const w = window as { Capacitor?: { Plugins?: Record<string, { addListener?: (event: string, cb: (ev: unknown) => void) => Promise<{ remove?: () => void }> }> } };
-    const plugin = w.Capacitor?.Plugins?.QRingPlugin;
-    if (!plugin?.addListener) return;
-    let handle: { remove?: () => void } | null = null;
-    plugin
-      .addListener('debug', (ev: unknown) => {
-        const e = ev as Partial<DebugState>;
-        setHasReceived(true);
-        setDebug({
-          writesSent: e.writesSent ?? 0,
-          notifiesReceived: e.notifiesReceived ?? 0,
-          lastWriteHex: e.lastWriteHex ?? '',
-          lastNotifyHex: e.lastNotifyHex ?? '',
-          lastError: e.lastError ?? '',
-          discoveredServices: e.discoveredServices ?? [],
-          discoveredCharacteristics: e.discoveredCharacteristics ?? [],
-        });
-      })
-      .then((h) => {
-        handle = h;
-      })
-      .catch(() => { /* not native, ignore */ });
+    mountedRef.current = true;
+    let removeFn: (() => void) | null = null;
+
+    try {
+      const w = window as unknown as {
+        Capacitor?: {
+          Plugins?: Record<string, unknown>;
+        };
+      };
+      const plugin = w.Capacitor?.Plugins?.QRingPlugin as
+        | { addListener?: (event: string, cb: (ev: unknown) => void) => Promise<{ remove?: () => void } | undefined> }
+        | undefined;
+
+      if (!plugin || typeof plugin.addListener !== 'function') {
+        return;
+      }
+
+      const handler = (ev: unknown) => {
+        if (!mountedRef.current) return;
+        try {
+          const e = (ev ?? {}) as Partial<DebugState>;
+          setHasReceived(true);
+          setDebug({
+            writesSent: typeof e.writesSent === 'number' ? e.writesSent : 0,
+            notifiesReceived: typeof e.notifiesReceived === 'number' ? e.notifiesReceived : 0,
+            lastWriteHex: typeof e.lastWriteHex === 'string' ? e.lastWriteHex : '',
+            lastNotifyHex: typeof e.lastNotifyHex === 'string' ? e.lastNotifyHex : '',
+            lastError: typeof e.lastError === 'string' ? e.lastError : '',
+            discoveredServices: Array.isArray(e.discoveredServices) ? e.discoveredServices.map(String) : [],
+            discoveredCharacteristics: Array.isArray(e.discoveredCharacteristics) ? e.discoveredCharacteristics.map(String) : [],
+          });
+        } catch {
+          /* swallow */
+        }
+      };
+
+      const result = plugin.addListener('debug', handler);
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        (result as Promise<{ remove?: () => void } | undefined>)
+          .then((handle) => {
+            if (handle && typeof handle.remove === 'function') {
+              removeFn = () => {
+                try { handle.remove?.(); } catch { /* swallow */ }
+              };
+            }
+          })
+          .catch(() => { /* listener registration failed, ignore */ });
+      }
+    } catch {
+      /* Capacitor not loaded or other error — render stays in idle state */
+    }
+
     return () => {
-      try { handle?.remove?.(); } catch { /* noop */ }
+      mountedRef.current = false;
+      if (removeFn) removeFn();
     };
   }, []);
 
@@ -90,40 +122,42 @@ export default function BLEDebugPanel() {
       <HexLine label="Última escrita" hex={debug.lastWriteHex} />
       <HexLine label="Último notify" hex={debug.lastNotifyHex} />
 
-      {debug.lastError && (
+      {debug.lastError ? (
         <div className="rounded-lg bg-destructive/10 p-2.5">
           <p className="text-[10px] font-medium text-destructive mb-0.5">Último erro</p>
           <p className="text-[10px] font-mono text-destructive break-all">{debug.lastError}</p>
         </div>
-      )}
+      ) : null}
 
-      {debug.discoveredServices.length > 0 && (
+      {debug.discoveredServices.length > 0 ? (
         <div className="space-y-1">
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Services BLE descobertos</p>
           <div className="space-y-1">
             {debug.discoveredServices.map((s, i) => (
-              <p key={`${s}-${i}`} className="text-[10px] font-mono text-foreground break-all">{s}</p>
+              <p key={`svc-${i}`} className="text-[10px] font-mono text-foreground break-all">{s}</p>
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {debug.discoveredCharacteristics.length > 0 && (
+      {debug.discoveredCharacteristics.length > 0 ? (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Characteristics ({debug.discoveredCharacteristics.length})</p>
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+            Characteristics ({debug.discoveredCharacteristics.length})
+          </p>
           <div className="space-y-0.5 max-h-32 overflow-y-auto">
             {debug.discoveredCharacteristics.map((c, i) => (
-              <p key={`${c}-${i}`} className="text-[9px] font-mono text-foreground break-all">{c}</p>
+              <p key={`char-${i}`} className="text-[9px] font-mono text-foreground break-all">{c}</p>
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {!hasReceived && (
+      {!hasReceived ? (
         <p className="text-[10px] text-muted-foreground italic">
-          Aguardando primeiro evento BLE. Toque em "Conectar agora" ou "Sincronizar tudo" pra começar.
+          Aguardando primeiro evento BLE. Toque em "Conectar agora" ou "Sincronizar agora" pra começar.
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -139,7 +173,6 @@ function Counter({ label, value }: { label: string; value: number }) {
 
 function HexLine({ label, hex }: { label: string; hex: string }) {
   if (!hex) return null;
-  // truncate very long hex strings
   const display = hex.length > 200 ? hex.slice(0, 200) + '…' : hex;
   return (
     <div className="space-y-1">
