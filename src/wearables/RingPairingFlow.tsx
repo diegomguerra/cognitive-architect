@@ -13,14 +13,13 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Bluetooth, Heart, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
+import { Bluetooth, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import {
   flushSamplesToBackend,
   rememberPairedQRing,
   forgetPairedQRing,
 } from './wearable.sync';
-import { useVYRStore } from '@/hooks/useVYRStore';
 import { toast } from 'sonner';
 import type { WearableDevice } from './jstyle/wearable.types';
 
@@ -29,7 +28,6 @@ type FlowStep =
   | 'scanning'
   | 'picking'
   | 'connecting-ring'
-  | 'requesting-health'
   | 'syncing-first'
   | 'done'
   | 'error';
@@ -43,15 +41,13 @@ export default function RingPairingFlow() {
   const [syncing, setSyncing] = useState(false);
 
   const ringState = wearableStore.getState();
-  const vyr = useVYRStore();
-  const { wearableConnection, connectWearable, disconnectWearable, syncWearable } = vyr;
 
   useEffect(() => wearableStore.subscribe(() => forceUpdate((n) => n + 1)), []);
 
-  // Auto-advance: when ring becomes connected during 'connecting-ring', go to health
+  // Auto-advance: when ring becomes connected during 'connecting-ring', go to first sync
   useEffect(() => {
     if (step === 'connecting-ring' && ringState.connectedDevice) {
-      void runHealthStep();
+      void runFirstSyncStep();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, ringState.connectedDevice]);
@@ -74,8 +70,6 @@ export default function RingPairingFlow() {
   }, [step]);
 
   const ringConnected = !!ringState.connectedDevice;
-  const healthActive = wearableConnection?.status === 'active' || wearableConnection?.status === 'connected';
-  const fullyOnboarded = ringConnected && healthActive;
 
   // ---- Flow steps ----
 
@@ -113,24 +107,11 @@ export default function RingPairingFlow() {
     // useEffect transitions to runHealthStep
   }
 
-  async function runHealthStep() {
-    setStep('requesting-health');
-    const hkOk = await connectWearable();
-    if (!hkOk) {
-      // Ring is connected but HealthKit denied/unavailable. We still consider
-      // the flow successful — BLE path runs alone. User can retry HK later.
-      toast.info('Apple Health não foi liberado. Você pode liberar depois nos ajustes.');
-      // Run a first BLE sync anyway so we have something to work with
-      await runFirstBleSync();
-      setStep('done');
-      return;
-    }
-    // First sync (HK incremental) already runs inside connectWearable.
-    // Now also run a BLE sync + flush so amostras chegam ao banco.
+  async function runFirstSyncStep() {
     setStep('syncing-first');
     await runFirstBleSync();
     setStep('done');
-    toast.success('Anel + Apple Health conectados');
+    toast.success('Anel conectado e sincronizado');
   }
 
   /** Runs a BLE sync via wearableStore (which accumulates samples in
@@ -151,64 +132,41 @@ export default function RingPairingFlow() {
 
   async function handleSyncAll() {
     setSyncing(true);
-    let bleOk = false;
-    let hkOk = false;
-    // BLE sync — pendingSamples gets populated, then flush to backend
     try {
       await wearableStore.sync();
       const total = Array.from(wearableStore.getState().pendingSamples.values())
         .reduce((sum, arr) => sum + arr.length, 0);
       if (total > 0) {
-        await flushSamplesToBackend();
+        const r = await flushSamplesToBackend();
+        toast.success(`Sincronizado · ${r?.inserted ?? total} amostras`);
+      } else {
+        toast.info('Sincronização rodou — sem amostras novas no anel');
       }
-      bleOk = true;
     } catch (e) {
       console.warn('[ring-pairing] BLE sync failed:', (e as Error)?.message);
-    }
-    // HealthKit sync — uses VYR store flow (also recomputes state)
-    try {
-      hkOk = await syncWearable();
-    } catch {
-      hkOk = false;
+      toast.error('Falha na sincronização');
     }
     setSyncing(false);
-    if (bleOk && hkOk) toast.success('Sincronizado: anel + Apple Health');
-    else if (bleOk) toast.info('Anel sincronizado, Apple Health falhou');
-    else if (hkOk) toast.info('Apple Health sincronizado, anel falhou');
-    else toast.error('Falha na sincronização');
   }
 
   async function handleDisconnect() {
     forgetPairedQRing();
-    await Promise.all([wearableStore.disconnect(), disconnectWearable()]);
+    await wearableStore.disconnect();
     setStep('idle');
     toast.success('Desconectado');
   }
 
   // ---- Render ----
 
-  if (fullyOnboarded) {
+  if (ringConnected) {
     return <ConnectedCard
       device={ringState.connectedDevice!}
       battery={ringState.diagnostics?.battery ?? null}
-      lastSyncAt={wearableConnection?.lastSyncAt ?? ringState.lastSyncAt}
+      fwVersion={ringState.diagnostics?.fwVersion ?? null}
+      lastSyncAt={ringState.lastSyncAt}
       onSync={handleSyncAll}
       onDisconnect={handleDisconnect}
       syncing={syncing}
-    />;
-  }
-
-  if (ringConnected || healthActive) {
-    return <PartialCard
-      device={ringState.connectedDevice}
-      ringConnected={ringConnected}
-      healthActive={healthActive}
-      onCompleteHealth={runHealthStep}
-      onCompleteRing={startFlow}
-      onSync={handleSyncAll}
-      onDisconnect={handleDisconnect}
-      syncing={syncing}
-      step={step}
     />;
   }
 
@@ -294,14 +252,6 @@ export default function RingPairingFlow() {
         </div>
       )}
 
-      {step === 'requesting-health' && (
-        <div className="flex flex-col items-center gap-2 py-2">
-          <Loader2 size={20} className="animate-spin text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">Liberando Apple Health...</p>
-          <p className="text-[10px] text-muted-foreground">Aceite as permissões no diálogo do sistema.</p>
-        </div>
-      )}
-
       {step === 'syncing-first' && (
         <div className="flex flex-col items-center gap-2 py-2">
           <Loader2 size={20} className="animate-spin text-muted-foreground" />
@@ -332,6 +282,7 @@ export default function RingPairingFlow() {
 function ConnectedCard({
   device,
   battery,
+  fwVersion,
   lastSyncAt,
   onSync,
   onDisconnect,
@@ -339,6 +290,7 @@ function ConnectedCard({
 }: {
   device: WearableDevice;
   battery: number | null;
+  fwVersion: string | null;
   lastSyncAt: string | null;
   onSync: () => void;
   onDisconnect: () => void;
@@ -355,8 +307,8 @@ function ConnectedCard({
           <Check size={20} style={{ color: 'hsl(var(--vyr-accent-stable))' }} />
         </div>
         <div className="flex-1">
-          <h3 className="text-sm font-semibold text-foreground">Conectado</h3>
-          <p className="text-xs text-muted-foreground">{device.name} · Apple Health ativo</p>
+          <h3 className="text-sm font-semibold text-foreground">Anel conectado</h3>
+          <p className="text-xs text-muted-foreground">{device.name}</p>
         </div>
         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
           style={{ background: 'hsl(var(--vyr-accent-stable) / 0.15)', color: 'hsl(var(--vyr-accent-stable))' }}>
@@ -365,8 +317,9 @@ function ConnectedCard({
       </div>
 
       <div className="rounded-xl bg-muted/30 p-3 space-y-1.5">
-        <StatusLine label="Anel BLE" detail={`${device.name}${battery != null && battery >= 0 ? ` · ${battery}%` : ''}`} />
-        <StatusLine label="Apple Health" detail="Sincronizando" />
+        <StatusLine label="Modelo" detail={device.model || device.name} />
+        {battery != null && battery >= 0 && <StatusLine label="Bateria" detail={`${battery}%`} />}
+        {fwVersion && <StatusLine label="Firmware" detail={fwVersion} />}
         {lastSyncStr && <StatusLine label="Última sync" detail={lastSyncStr} />}
       </div>
 

@@ -1,10 +1,7 @@
-VYR 8.0(104) — Coleta BLE mais agressiva pra contornar drain do app oficial
+VYR 8.0(105) — Foco no anel BLE + diagnóstico de bytes brutos
 
-Descoberta de ontem: o app oficial do anel (QRing/Colmi) drena+esvazia o anel a cada sincronização BLE. Quem usa os dois apps simultaneamente acabava com Apple Health cheio e dados brutos via Bluetooth do VYR vazios.
+Mudanças visuais na tela de Integrações pra focar 100% no fluxo do anel via Bluetooth:
 
-3 mudanças pra contornar:
-- Ao parear, VYR já configura o anel pra gravar FC a cada 5 min (vs ~30 min padrão). Mais amostras acumuladas, mais chance de capturar antes do oficial drenar.
-- Cada vez que o VYR vira ativo (foreground), dispara automaticamente uma sincronização BLE — pega o que o anel acumulou desde a última sync.
-- Card de Integrações agora avisa: se você usa o app oficial do anel, mantenha-o fechado entre uma sync e outra do VYR pra coleta bruta completa.
-
-Fluxo Apple Health (FC, RHR, HRV, sono, passos) continua igual.
+- Card de pareamento agora é só sobre o anel. Não pede mais Apple Health (a coleta via Apple Health continua rodando em background pra não interromper o VYR State, mas você não precisa pensar nisso na tela).
+- Painel "Diagnóstico BLE" aparece embaixo do card. Mostra em tempo real: quantos comandos foram enviados, quantos pacotes o anel respondeu, último hex enviado e recebido, services e characteristics descobertos. Útil pra ver se o anel está realmente conversando com o app.
+- "Sincronizar agora" mostra no toast quantas amostras foram inseridas (ex: "Sincronizado · 12 amostras") ou alerta quando anel responde sem dados novos.
