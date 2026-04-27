@@ -1,7 +1,7 @@
-VYR 8.0(105) — Foco no anel BLE + diagnóstico de bytes brutos
+VYR 8.0(106) — Fix do build 105
 
-Mudanças visuais na tela de Integrações pra focar 100% no fluxo do anel via Bluetooth:
+A 105 saiu com o web bundle desatualizado por engano (cap sync ios não foi executado antes do archive). O painel "Diagnóstico BLE" não apareceu porque o web bundle dentro do IPA era de uma build mais antiga.
 
-- Card de pareamento agora é só sobre o anel. Não pede mais Apple Health (a coleta via Apple Health continua rodando em background pra não interromper o VYR State, mas você não precisa pensar nisso na tela).
-- Painel "Diagnóstico BLE" aparece embaixo do card. Mostra em tempo real: quantos comandos foram enviados, quantos pacotes o anel respondeu, último hex enviado e recebido, services e characteristics descobertos. Útil pra ver se o anel está realmente conversando com o app.
-- "Sincronizar agora" mostra no toast quantas amostras foram inseridas (ex: "Sincronizado · 12 amostras") ou alerta quando anel responde sem dados novos.
+Esta versão corrige isso. Ao abrir Integrações você verá:
+- Card de Pareamento BLE (sem mais menção a Apple Health na UI)
+- Painel "Diagnóstico BLE" logo abaixo, mostrando bytes brutos do anel em tempo real (writesSent, notifiesReceived, last write hex, last notify hex, services e characteristics descobertos).
