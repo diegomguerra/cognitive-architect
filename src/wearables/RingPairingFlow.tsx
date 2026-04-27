@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Bluetooth, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
+import { Bluetooth, Heart, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import {
   flushSamplesToBackend,

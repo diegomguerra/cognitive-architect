@@ -1,5 +1,7 @@
-VYR 8.0(107) — Fix tela Integrações que não abria
+VYR 8.0(108) — Fix tela Integrações (build 105/106/107 quebrava)
 
-A 8.0(106) introduziu o painel "Diagnóstico BLE" mas o componente podia crashar a tela inteira ao registrar listener Bluetooth (caso o Capacitor ou plugin não estivessem 100% prontos no momento da renderização).
+A tela Integrações não abria nas builds 105, 106 e 107. Causa: ao remover Apple Health do código, sobrou uma referência ao componente <Heart> sem o import correspondente. O JS tentava criar componente undefined e a página inteira crashava em runtime sem erro visível.
 
-Esta versão protege todo o painel com try/catch + checagens de tipo, então mesmo se o plugin estiver indisponível por uma fração de segundo a página de Integrações abre normalmente. O painel mostra placeholder até receber o primeiro evento BLE.
+Diagnóstico definitivo: import faltando, não bug do BLEDebugPanel.
+
+Fix: re-importado o ícone. Tela de Integrações abre normalmente. Painel "Diagnóstico BLE" agora aparece logo abaixo do card do anel mostrando bytes brutos em tempo real.
