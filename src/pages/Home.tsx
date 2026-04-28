@@ -434,10 +434,7 @@ const Home = () => {
         <SachetConfirmation
           phase={sachetConfirmation.phase}
           onDismiss={store.dismissConfirmation}
-          onAddObservation={() => {
-            store.dismissConfirmation();
-            navigate('/labs?tab=Perce%C3%A7%C3%B5es&phase=' + sachetConfirmation.phase);
-          }}
+          onAddObservation={store.dismissConfirmation}
         />
       )}
 
