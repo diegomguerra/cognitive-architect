@@ -128,6 +128,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var realtimeHrSamples: [[String: Any]] = []
     private var realtimeSpo2Samples: [[String: Any]] = []
     private var realtimeHrvSamples: [[String: Any]] = []
+    private var realtimeRRIntervals: [Int] = []  // rr_ms from HR realtime packets
+    private var rrIntervalSamples: [[String: Any]] = []
     private var debugRawSamples: [[String: Any]] = []
 
     // V2 temperature packet assembler. V2 responses can span multiple BLE notifications;
@@ -322,6 +324,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         realtimeHrSamples.removeAll()
         realtimeSpo2Samples.removeAll()
         realtimeHrvSamples.removeAll()
+        realtimeRRIntervals.removeAll()
+        rrIntervalSamples.removeAll()
         debugRawSamples.removeAll()
         tempBuffer.removeAll()
         tempExpectedLength = -1
@@ -349,26 +353,35 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self?.sendTemperatureHistoryRequest()
         }
 
-        // Phase 3: realtime readings — single snapshot HR/SpO2/HRV. Ring auto-stops
-        // after ~10s per type. Space them 2.5s apart so each auto-stops before
-        // the next starts (some firmwares don't multiplex realtime types).
+        // Phase 3: realtime readings — HR/SpO2/HRV sequentially.
+        // R09 needs ~30-45s warmup per type. We give 50s per type, stopping the
+        // previous before starting the next to avoid firmware conflicts.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.sendRealtime(type: Self.RT_TYPE_HR)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
-            self?.sendRealtime(type: Self.RT_TYPE_SPO2)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 52.0) { [weak self] in
             guard let self = self else { return }
-            if self.isHrvSupported() {
-                self.sendRealtime(type: Self.RT_TYPE_HRV)
+            // Stop HR, start SpO2
+            self.sendRealtimeStop(type: Self.RT_TYPE_HR)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.sendRealtime(type: Self.RT_TYPE_SPO2)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 103.0) { [weak self] in
+            guard let self = self else { return }
+            // Stop SpO2, start HRV
+            self.sendRealtimeStop(type: Self.RT_TYPE_SPO2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                if self.isHrvSupported() {
+                    self.sendRealtime(type: Self.RT_TYPE_HRV)
+                }
             }
         }
 
         // Phase 4 (optional, gated): V1 history commands — only if flag enabled.
         // Parser is known broken for R09 on some types; keep off until validated.
         if historyEnabled {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 140.0) { [weak self] in
                 guard let self = self else { return }
                 self.sendHRSettings(enable: true, intervalMinutes: 5)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.sendHRHistory(dayOffset: 0) }
@@ -382,15 +395,19 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
 
-        // Phase 5: resolve after quiet period. Longer window if history is on.
-        let quietDelay: TimeInterval = historyEnabled ? 14.0 : 11.0
+        // Phase 5: resolve after quiet period. Must wait for all 3 realtime types (~150s).
+        let quietDelay: TimeInterval = historyEnabled ? 165.0 : 155.0
         DispatchQueue.main.asyncAfter(deadline: .now() + quietDelay) { [weak self] in
             guard let self = self else { return }
 
             // Flush any buffered realtime samples as syncData events
-            self.flushRealtimeBatch(type: "hr_realtime", samples: &self.realtimeHrSamples)
-            self.flushRealtimeBatch(type: "spo2_realtime", samples: &self.realtimeSpo2Samples)
-            self.flushRealtimeBatch(type: "hrv_realtime", samples: &self.realtimeHrvSamples)
+            // Use standard types (hr/spo2/hrv) so edge function accepts them
+            self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
+            self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
+            self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
+
+            // Derive RHR and Stress from collected data
+            self.deriveBiomarkers()
             // Debug raw is flushed continuously during sync as batches fill; flush any leftover
             self.flushDebugRawBatch(force: true)
 
@@ -439,13 +456,21 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Start realtime stream for a single biomarker type (0x69 request).
-    /// Ring emits periodic readings for ~10s, then auto-stops. Caller is
-    /// responsible for capturing values via notify parser.
+    /// Ring emits periodic readings until stopped or auto-stops after ~60s.
     private func sendRealtime(type: UInt8) {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_REALTIME
         pkt[1] = type
         pkt[2] = 0x01
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Stop realtime stream for a given type (0x6A).
+    private func sendRealtimeStop(type: UInt8) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = 0x6A  // CMD_RT_STOP
+        pkt[1] = type
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
@@ -1011,6 +1036,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private func parseRealtime(_ b: [UInt8]) {
         // Layout: [0]=0x69 (cmd), [1]=type, [2]=value (for HR/SpO2),
         // HRV uses bytes[2..3] LE 16-bit for RMSSD in ms (firmware ≥ 3.00.10).
+        // HR also carries RR interval in bytes[3..4] (LE 16-bit ms).
         let type = b[1]
         let v = Int(b[2])
 
@@ -1027,8 +1053,23 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "type": "hr",
                 "ts": now,
                 "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "realtime"],
             ])
-            notifyListeners("realtime", data: ["type": "hr_realtime", "value": v])
+            notifyListeners("realtime", data: ["type": "hr", "value": v])
+
+            // Extract RR interval from bytes[3..4] (LE 16-bit ms)
+            let rrMs = Int(b[3]) | (Int(b[4]) << 8)
+            if (300...2000).contains(rrMs) {
+                realtimeRRIntervals.append(rrMs)
+                rrIntervalSamples.append([
+                    "type": "rr_interval",
+                    "ts": nowMsUnique(),
+                    "value": rrMs,
+                    "source": "qring_ble",
+                    "payload_json": ["mode": "realtime", "metric": "rr_ms"],
+                ])
+            }
         case Self.RT_TYPE_SPO2:
             // Physiological range 70-100%
             guard (70...100).contains(v) else { return }
@@ -1036,8 +1077,10 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "type": "spo2",
                 "ts": now,
                 "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "realtime"],
             ])
-            notifyListeners("realtime", data: ["type": "spo2_realtime", "value": v])
+            notifyListeners("realtime", data: ["type": "spo2", "value": v])
         case Self.RT_TYPE_HRV:
             // HRV RMSSD typically 15-200 ms. Byte layout may be single byte or LE 16-bit
             // depending on firmware — validate range.
@@ -1046,9 +1089,109 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "type": "hrv",
                 "ts": now,
                 "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "realtime"],
             ])
-            notifyListeners("realtime", data: ["type": "hrv_realtime", "value": v])
+            notifyListeners("realtime", data: ["type": "hrv", "value": v])
         default: break
+        }
+    }
+
+    // MARK: - Derived Biomarkers (RHR, Stress)
+
+    private func deriveBiomarkers() {
+        let now = nowMsUnique()
+
+        // --- RHR: lowest 10th percentile of HR readings ---
+        var allHR: [Int] = []
+        for s in realtimeHrSamples {
+            if let v = s["value"] as? Int, (30...220).contains(v) { allHR.append(v) }
+        }
+        for s in hrSamples {
+            if let v = s["value"] as? Int, (30...220).contains(v) { allHR.append(v) }
+        }
+        if !allHR.isEmpty {
+            let sorted = allHR.sorted()
+            let rhr: Int
+            if sorted.count >= 10 {
+                let p10Count = max(1, sorted.count / 10)
+                rhr = sorted.prefix(p10Count).reduce(0, +) / p10Count
+            } else {
+                rhr = sorted.first!
+            }
+            var rhrSamples: [[String: Any]] = []
+            rhrSamples.append([
+                "type": "rhr",
+                "ts": now,
+                "value": rhr,
+                "source": "qring_ble",
+                "payload_json": ["mode": "derived", "method": "p10_hr", "hr_count": allHR.count],
+            ])
+            notifyListeners("syncData", data: ["type": "rhr", "samples": rhrSamples])
+            notifyListeners("syncEnd", data: ["type": "rhr"])
+        }
+
+        // --- Stress: derived from RMSSD of RR intervals ---
+        if realtimeRRIntervals.count >= 3 {
+            var sumSqDiff: Double = 0
+            for i in 1..<realtimeRRIntervals.count {
+                let diff = Double(realtimeRRIntervals[i] - realtimeRRIntervals[i - 1])
+                sumSqDiff += diff * diff
+            }
+            let rmssd = sqrt(sumSqDiff / Double(realtimeRRIntervals.count - 1))
+            // Stress index: inverse of RMSSD (high RMSSD = low stress)
+            let stressValue = Int(max(0, min(100, 100 - rmssd * 1.5)))
+
+            var stressSamples: [[String: Any]] = []
+            stressSamples.append([
+                "type": "stress",
+                "ts": now,
+                "value": stressValue,
+                "source": "qring_ble",
+                "payload_json": [
+                    "mode": "derived",
+                    "method": "rmssd_inverse",
+                    "rmssd": round(rmssd * 10) / 10,
+                    "rr_count": realtimeRRIntervals.count,
+                ],
+            ])
+            notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
+            notifyListeners("syncEnd", data: ["type": "stress"])
+
+            // If no direct HRV reading was captured, emit RMSSD as HRV
+            if realtimeHrvSamples.isEmpty {
+                var fallbackHrv: [[String: Any]] = []
+                fallbackHrv.append([
+                    "type": "hrv",
+                    "ts": nowMsUnique(),
+                    "value": Int(round(rmssd)),
+                    "source": "qring_ble",
+                    "payload_json": ["mode": "derived", "method": "rmssd_from_rr", "rr_count": realtimeRRIntervals.count],
+                ])
+                notifyListeners("syncData", data: ["type": "hrv", "samples": fallbackHrv])
+                notifyListeners("syncEnd", data: ["type": "hrv"])
+            }
+        }
+        // Fallback: derive stress from HRV value if no RR intervals
+        else if let lastHRV = realtimeHrvSamples.last, let hrvVal = lastHRV["value"] as? Int {
+            let stressValue = Int(max(0, min(100, 100 - Double(hrvVal) * 1.5)))
+            var stressSamples: [[String: Any]] = []
+            stressSamples.append([
+                "type": "stress",
+                "ts": now,
+                "value": stressValue,
+                "source": "qring_ble",
+                "payload_json": ["mode": "derived", "method": "hrv_inverse", "hrv_value": hrvVal],
+            ])
+            notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
+            notifyListeners("syncEnd", data: ["type": "stress"])
+        }
+
+        // Flush RR interval samples
+        if !rrIntervalSamples.isEmpty {
+            notifyListeners("syncData", data: ["type": "rr_interval", "samples": rrIntervalSamples])
+            notifyListeners("syncEnd", data: ["type": "rr_interval"])
+            rrIntervalSamples.removeAll()
         }
     }
 }
