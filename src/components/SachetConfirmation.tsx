@@ -30,13 +30,18 @@ const SachetConfirmation = ({ phase, onDismiss }: SachetConfirmationProps) => {
   const { logPerception, perceptionsDone } = useVYRStore();
   const alreadyDone = perceptionsDone.includes(phase);
 
-  const [showSliders, setShowSliders] = useState(false);
   const [values, setValues] = useState<Record<string, number>>(
     Object.fromEntries(sliders.map((s) => [s.key, 5]))
   );
+  const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const handleSavePerception = async () => {
+  const handleSliderChange = (key: string, val: number) => {
+    setValues((prev) => ({ ...prev, [key]: val }));
+    setTouched(true);
+  };
+
+  const handleSave = async () => {
     setSaving(true);
     try {
       await logPerception(phase, values);
@@ -91,8 +96,8 @@ const SachetConfirmation = ({ phase, onDismiss }: SachetConfirmationProps) => {
           </p>
         </div>
 
-        {/* Perception Sliders (inline) */}
-        {showSliders && !alreadyDone && (
+        {/* Perception Sliders — always visible */}
+        {!alreadyDone && (
           <div className="space-y-4 pt-2">
             <p className="text-xs text-muted-foreground text-center">Como você está se sentindo agora?</p>
             {sliders.map((s) => (
@@ -106,7 +111,7 @@ const SachetConfirmation = ({ phase, onDismiss }: SachetConfirmationProps) => {
                   min={0}
                   max={10}
                   value={values[s.key]}
-                  onChange={(e) => setValues((prev) => ({ ...prev, [s.key]: Number(e.target.value) }))}
+                  onChange={(e) => handleSliderChange(s.key, Number(e.target.value))}
                   className="w-full accent-primary h-1"
                 />
                 <div className="flex justify-between mt-0.5">
@@ -118,51 +123,25 @@ const SachetConfirmation = ({ phase, onDismiss }: SachetConfirmationProps) => {
           </div>
         )}
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-2">
-          {!showSliders && !alreadyDone ? (
-            <>
-              <button
-                onClick={() => setShowSliders(true)}
-                className="flex-1 rounded-xl border border-border py-3 text-sm font-medium text-foreground transition-all active:scale-[0.98]"
-              >
-                Registrar percepções
-              </button>
-              <button
-                onClick={onDismiss}
-                className="flex-1 rounded-xl py-3 text-sm font-medium text-foreground transition-all active:scale-[0.98]"
-                style={{
-                  background: `hsl(var(${config.colorVar}))`,
-                  boxShadow: `0 4px 12px -4px hsl(var(${config.colorVar}) / 0.4)`,
-                }}
-              >
-                Continuar
-              </button>
-            </>
-          ) : showSliders && !alreadyDone ? (
-            <button
-              onClick={handleSavePerception}
-              disabled={saving}
-              className="w-full rounded-xl py-3 text-sm font-medium text-foreground transition-all active:scale-[0.98] disabled:opacity-50"
-              style={{
-                background: `hsl(var(${config.colorVar}))`,
-                boxShadow: `0 4px 12px -4px hsl(var(${config.colorVar}) / 0.4)`,
-              }}
-            >
-              {saving ? 'Salvando...' : `Registrar ${phase}`}
-            </button>
-          ) : (
-            <button
-              onClick={onDismiss}
-              className="w-full rounded-xl py-3 text-sm font-medium text-foreground transition-all active:scale-[0.98]"
-              style={{
-                background: `hsl(var(${config.colorVar}))`,
-                boxShadow: `0 4px 12px -4px hsl(var(${config.colorVar}) / 0.4)`,
-              }}
-            >
-              Continuar
-            </button>
-          )}
+        {/* Single CTA */}
+        <div className="pt-2">
+          <button
+            onClick={alreadyDone ? onDismiss : handleSave}
+            disabled={saving}
+            className="w-full rounded-xl py-3 text-sm font-medium text-foreground transition-all active:scale-[0.98] disabled:opacity-50"
+            style={{
+              background: `hsl(var(${config.colorVar}))`,
+              boxShadow: `0 4px 12px -4px hsl(var(${config.colorVar}) / 0.4)`,
+            }}
+          >
+            {alreadyDone
+              ? 'Continuar'
+              : saving
+                ? 'Salvando...'
+                : touched
+                  ? 'Salvar'
+                  : 'Registrar percepções'}
+          </button>
         </div>
       </div>
     </div>
