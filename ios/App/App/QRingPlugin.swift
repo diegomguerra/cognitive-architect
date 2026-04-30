@@ -84,11 +84,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // Feature flags (runtime-configurable via sync options)
     // - historyEnabled: send V1 history commands (0x15 HR, 0x43 Steps, 0x44 Sleep,
-    //   0x2C SpO2, 0x37 Stress, 0x39 HRV). Currently OFF by default because the R09
-    //   parser emits garbage for some of these. Re-enable after parser is validated.
+    //   0x2C SpO2, 0x37 Stress, 0x39 HRV). ON by default — R09 history is the
+    //   primary source for SpO2/HRV/Stress (realtime returns all zeros for these).
     // - debugRawEnabled: emit EVERY notify packet as a `debug_raw` sample. Always ON
     //   until parser is validated, so we keep a reverse-engineering corpus.
-    private var historyEnabled = false
+    private var historyEnabled = true
     private var debugRawEnabled = true
 
     // MARK: - State
@@ -336,79 +336,88 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         // Reset monotonic sample sequence so nudges stay bounded per sync
         sampleSeq = 0
 
-        // --- Core sync sequence (realtime-first) ---
-        // Phase 1: setup — SetTime + Battery + enable temp measurement on ring
+        // --- Sync sequence: HISTORY FIRST, then REALTIME ---
+        //
+        // Build 334 root cause: realtime (CMD 0x69) started at t+2s BEFORE history
+        // at t+3s. Ring's continuous realtime packets blocked opQueue, preventing
+        // history commands from being sent. Result: 0 history packets received.
+        //
+        // Fix: all history commands complete BEFORE realtime starts.
+        // Realtime HR is only needed for RR intervals (derive HRV/Stress).
+        //
+        // Phase 1: Setup (t+0s) — time, battery, auto-measurement enables
+        // Phase 2: V2 Temperature history (t+2s) — separate channel, non-blocking
+        // Phase 3: V1 History commands (t+3s) — HR, Steps, SpO2, Stress, HRV
+        // Phase 4: Realtime HR for RR intervals (t+11s) — after history completes
+        // Phase 5: Resolve (t+32s) — stop realtime, derive, flush
+
+        // Phase 1: Setup + auto-measurement enables
         sendSetTime()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self = self else { return }
-            self.sendBattery()
+            self?.sendBattery()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             self?.sendTemperaturePref(enable: true)
         }
-
-        // Phase 2: temperature history request on V2 channel (R09 supports; older
-        // rings respond with nothing — harmless if writeCharV2 is nil, write is skipped)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.sendHRSettings(enable: true, intervalMinutes: 5)
+        }
+        // Enable auto-measurements (persist on ring across disconnects)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.sendAutoMeasurementEnable(cmd: Self.CMD_SPO2_HISTORY, intervalMinutes: 30)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sendAutoMeasurementEnable(cmd: Self.CMD_STRESS_HIST, intervalMinutes: 0)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            if self?.isHrvSupported() == true {
+                self?.sendAutoMeasurementEnable(cmd: Self.CMD_HRV_HISTORY, intervalMinutes: 0)
+            }
+        }
+
+        // Phase 2: V2 Temperature history (separate BLE channel, non-blocking)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             self?.sendTemperatureHistoryRequest()
         }
 
-        // Phase 3: realtime readings — HR/SpO2/HRV sequentially.
-        // R09 needs ~30-45s warmup per type. We give 50s per type, stopping the
-        // previous before starting the next to avoid firmware conflicts.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        // Phase 3: V1 History commands — primary data source
+        // Each command gets 2.5s window for multi-packet response
+        if historyEnabled {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                self?.sendHRHistory(dayOffset: 0)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) { [weak self] in
+                self?.sendStepsHistory(dayOffset: 0)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+                self?.sendSpo2History()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8.5) { [weak self] in
+                self?.sendStressHistory()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 9.0) { [weak self] in
+                if self?.isHrvSupported() == true { self?.sendHrvHistory() }
+            }
+        }
+
+        // Phase 4: Realtime HR for RR interval collection (AFTER history completes)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 11.0) { [weak self] in
+            guard self?.pendingSyncCall != nil else { return }
             self?.sendRealtime(type: Self.RT_TYPE_HR)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 52.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25.0) { [weak self] in
+            guard self?.pendingSyncCall != nil else { return }
+            self?.sendRealtimeContinue(type: Self.RT_TYPE_HR)
+        }
+
+        // Phase 5: Resolve at t+32s — stop realtime, derive, flush
+        DispatchQueue.main.asyncAfter(deadline: .now() + 32.0) { [weak self] in
             guard let self = self else { return }
-            // Stop HR, start SpO2
             self.sendRealtimeStop(type: Self.RT_TYPE_HR)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self.sendRealtime(type: Self.RT_TYPE_SPO2)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 103.0) { [weak self] in
-            guard let self = self else { return }
-            // Stop SpO2, start HRV
-            self.sendRealtimeStop(type: Self.RT_TYPE_SPO2)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                if self.isHrvSupported() {
-                    self.sendRealtime(type: Self.RT_TYPE_HRV)
-                }
-            }
-        }
-
-        // Phase 4 (optional, gated): V1 history commands — only if flag enabled.
-        // Parser is known broken for R09 on some types; keep off until validated.
-        if historyEnabled {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 140.0) { [weak self] in
-                guard let self = self else { return }
-                self.sendHRSettings(enable: true, intervalMinutes: 5)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.sendHRHistory(dayOffset: 0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.sendStepsHistory(dayOffset: 0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.sendSleepHistory(dayOffset: 0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.sendSpo2History(dayOffset: 0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.sendStressHistory(dayOffset: 0) }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                    if self.isHrvSupported() { self.sendHrvHistory(dayOffset: 0) }
-                }
-            }
-        }
-
-        // Phase 5: resolve after quiet period. Must wait for all 3 realtime types (~150s).
-        let quietDelay: TimeInterval = historyEnabled ? 165.0 : 155.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + quietDelay) { [weak self] in
-            guard let self = self else { return }
-
-            // Flush any buffered realtime samples as syncData events
-            // Use standard types (hr/spo2/hrv) so edge function accepts them
             self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
             self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
             self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
-
-            // Derive RHR and Stress from collected data
             self.deriveBiomarkers()
-            // Debug raw is flushed continuously during sync as batches fill; flush any leftover
             self.flushDebugRawBatch(force: true)
 
             if let c = self.pendingSyncCall {
@@ -423,6 +432,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                     "rt_hr_count": self.realtimeHrSamples.count,
                     "rt_spo2_count": self.realtimeSpo2Samples.count,
                     "rt_hrv_count": self.realtimeHrvSamples.count,
+                    "rr_count": self.realtimeRRIntervals.count,
                     "fw_version": self.firmwareRev ?? "",
                     "history_enabled": self.historyEnabled,
                     "debug_raw_enabled": self.debugRawEnabled,
@@ -462,6 +472,17 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         pkt[0] = Self.CMD_REALTIME
         pkt[1] = type
         pkt[2] = 0x01
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Send CONTINUE action to keep a realtime stream alive.
+    /// R09 stops sending data after ~30-40s without this. Protocol: Action.CONTINUE = 3.
+    private func sendRealtimeContinue(type: UInt8) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.CMD_REALTIME
+        pkt[1] = type
+        pkt[2] = 0x03  // Action.CONTINUE
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
@@ -539,42 +560,45 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_STEPS_HIST
         pkt[1] = UInt8(dayOffset & 0xFF)
-        pkt[2] = 0x0F
-        pkt[3] = 0x00
-        pkt[4] = 0x5F
-        pkt[5] = 0x01
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
 
-    private func sendSleepHistory(dayOffset: Int) {
-        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
-        pkt[0] = Self.CMD_SLEEP_HIST
-        pkt[1] = UInt8(dayOffset & 0xFF)
-        pkt[15] = checksum(pkt)
-        queueWrite(Data(pkt))
-    }
-
-    private func sendSpo2History(dayOffset: Int) {
+    private func sendSpo2History() {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_SPO2_HISTORY
-        pkt[1] = UInt8(dayOffset & 0xFF)
+        pkt[1] = 0x01   // READ sub-command
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
 
-    private func sendStressHistory(dayOffset: Int) {
+    private func sendStressHistory() {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_STRESS_HIST
-        pkt[1] = 0x01
+        pkt[1] = 0x01   // READ sub-command
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
 
-    private func sendHrvHistory(dayOffset: Int) {
+    private func sendHrvHistory() {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.CMD_HRV_HISTORY
-        pkt[1] = 0x01
+        pkt[1] = 0x01   // READ sub-command
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Enable auto-measurement on the ring. Uses the same CMD as history
+    /// but with sub-command 0x02 (WRITE) instead of 0x01 (READ).
+    /// These settings persist on the ring across disconnects.
+    private func sendAutoMeasurementEnable(cmd: UInt8, intervalMinutes: Int) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = cmd
+        pkt[1] = 0x02   // WRITE sub-command
+        pkt[2] = 0x01   // enable
+        if intervalMinutes > 0 {
+            pkt[3] = UInt8(max(5, min(60, intervalMinutes)))
+        }
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
@@ -757,18 +781,21 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         default: break
         }
 
-        // History commands are gated because their parsers are known-broken on R09.
-        // When historyEnabled=false we still capture bytes via debug_raw above but
-        // skip the buggy parsers. When flipped on (after parser rewrite), the
-        // regular samples flow again.
+        // Auto-measurement ack responses (sub-cmd 0x02) are always parsed
+        // regardless of historyEnabled flag
+        switch cmd {
+        case Self.CMD_SPO2_HISTORY: parseSpo2History(bytes); return
+        case Self.CMD_STRESS_HIST:  parseStressHistory(bytes); return
+        case Self.CMD_HRV_HISTORY:  parseHrvHistory(bytes); return
+        default: break
+        }
+
+        // History data parsers (gated by historyEnabled flag)
         if historyEnabled {
             switch cmd {
             case Self.CMD_HR_HISTORY:   parseHrHistory(bytes)
             case Self.CMD_STEPS_HIST:   parseStepsHistory(bytes)
             case Self.CMD_SLEEP_HIST:   parseSleepHistory(bytes)
-            case Self.CMD_SPO2_HISTORY: parseSpo2History(bytes)
-            case Self.CMD_STRESS_HIST:  parseStressHistory(bytes)
-            case Self.CMD_HRV_HISTORY:  parseHrvHistory(bytes)
             default:
                 NSLog("[QRing] unhandled cmd 0x%02X", cmd)
             }
@@ -896,27 +923,54 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseHrHistory(_ b: [UInt8]) {
+        // Colmi HR History multi-packet protocol (Python HeartRateLogParser):
+        //   Packet 0 (subIdx=0): metadata — b[2]=total_data_packets, b[3]=interval_minutes
+        //   Packet 1 (subIdx=1): b[2..5]=LE32 epoch (day start), b[6..14]=first 9 HR values
+        //   Packet N (subIdx>=2): b[2..14]=13 HR values each
+        //   Total: 288 slots/day at 5-min intervals (9 + 22*13 = 295 capacity)
         let subIdx = Int(b[1])
         if subIdx == 0 {
             expectedHrPackets = Int(b[2])
             hrIntervalMinutes = Int(b[3])
             if !(1...120).contains(hrIntervalMinutes) { hrIntervalMinutes = 5 }
             receivedHrPackets = 0
+            NSLog("[QRing] HR history metadata: %d data packets, %d min interval", expectedHrPackets, hrIntervalMinutes)
             return
         }
-        let startByte = 2
-        let endByte = 14
-        let valueCount = endByte - startByte + 1
-        for i in startByte...endByte {
+
+        let startByte: Int
+        let valuesPerFirstPacket = 9  // packet 1 has timestamp in [2..5], values in [6..14]
+        let valuesPerPacket = 13      // packet 2+ has values in [2..14]
+
+        if subIdx == 1 {
+            // Extract day epoch from bytes[2..5] LE32 — use ring's timestamp, not request's
+            let epoch = UInt32(b[2]) | (UInt32(b[3]) << 8) | (UInt32(b[4]) << 16) | (UInt32(b[5]) << 24)
+            if epoch > 0 {
+                hrDayEpoch = TimeInterval(epoch)
+                NSLog("[QRing] HR history day epoch from ring: %d", epoch)
+            }
+            startByte = 6  // first 9 values start at byte 6
+        } else {
+            startByte = 2  // 13 values start at byte 2
+        }
+
+        for i in startByte...14 {
             let v = Int(b[i])
-            if v == 0 { continue }
+            if v == 0 || !(30...220).contains(v) { continue }
             let slotInPkt = i - startByte
-            let globalSlot = (subIdx - 1) * valueCount + slotInPkt
+            let globalSlot: Int
+            if subIdx == 1 {
+                globalSlot = slotInPkt
+            } else {
+                globalSlot = valuesPerFirstPacket + (subIdx - 2) * valuesPerPacket + slotInPkt
+            }
             let tsSec = hrDayEpoch + Double(globalSlot * hrIntervalMinutes * 60)
             hrSamples.append([
                 "type": "hr",
                 "ts": tsSec * 1000,
-                "value": v
+                "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "history", "slot": globalSlot, "packet": subIdx],
             ])
         }
         receivedHrPackets += 1
@@ -954,7 +1008,9 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             stepsSamples.append([
                 "type": "steps",
                 "ts": tsSec * 1000,
-                "value": v
+                "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "history", "slot": slot],
             ])
         }
         receivedStepsPackets += 1
@@ -974,11 +1030,19 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseSleepHistory(_ b: [UInt8]) {
+        // R09 CMD 0x44 returns error (0xC4 = error bit set). Sleep data on R09
+        // requires Big Data V2 (ID 39). We still capture raw for diagnostics.
         let hex = b.map { String(format: "%02X", $0) }.joined(separator: " ")
+        NSLog("[QRing] sleep history raw (CMD 0x44 — may be error on R09): %@", hex)
+        if b[0] & 0x80 != 0 {
+            NSLog("[QRing] sleep history error response (bit 7 set) — R09 needs Big Data V2")
+            return
+        }
         sleepSamples.append([
             "type": "sleep",
             "ts": nowMsUnique(),
-            "raw": hex
+            "raw": hex,
+            "source": "qring_ble",
         ])
         notifyListeners("syncData", data: ["type": "sleep", "samples": sleepSamples])
         notifyListeners("syncEnd", data: ["type": "sleep"])
@@ -986,12 +1050,19 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseSpo2History(_ b: [UInt8]) {
+        // Sub-command in b[1]: 0x01=READ response, 0x02=WRITE ack
+        if b[1] == 0x02 {
+            NSLog("[QRing] SpO2 auto-measurement enable ack")
+            return
+        }
         let pct = Int(b[2])
         if (50...100).contains(pct) {
             spo2Samples.append([
                 "type": "spo2",
                 "ts": nowMsUnique(),
-                "value": pct
+                "value": pct,
+                "source": "qring_ble",
+                "payload_json": ["mode": "history"],
             ])
         }
         if !spo2Samples.isEmpty {
@@ -1002,12 +1073,18 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseStressHistory(_ b: [UInt8]) {
+        if b[1] == 0x02 {
+            NSLog("[QRing] Stress auto-measurement enable ack")
+            return
+        }
         let v = Int(b[2])
         if (1...100).contains(v) {
             stressSamples.append([
                 "type": "stress",
                 "ts": nowMsUnique(),
-                "value": v
+                "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "history"],
             ])
         }
         if !stressSamples.isEmpty {
@@ -1018,12 +1095,18 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseHrvHistory(_ b: [UInt8]) {
+        if b[1] == 0x02 {
+            NSLog("[QRing] HRV auto-measurement enable ack")
+            return
+        }
         let v = Int(b[2])
         if (5...250).contains(v) {
             hrvSamples.append([
                 "type": "hrv",
                 "ts": nowMsUnique(),
-                "value": v
+                "value": v,
+                "source": "qring_ble",
+                "payload_json": ["mode": "history"],
             ])
         }
         if !hrvSamples.isEmpty {
@@ -1034,32 +1117,22 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseRealtime(_ b: [UInt8]) {
-        // Layout: [0]=0x69 (cmd), [1]=type, [2]=value (for HR/SpO2),
-        // HRV uses bytes[2..3] LE 16-bit for RMSSD in ms (firmware ≥ 3.00.10).
-        // HR also carries RR interval in bytes[3..4] (LE 16-bit ms).
+        // R09 packet layout (verified from 553 debug_raw packets):
+        //   [0]=0x69 (cmd), [1]=type, [2]=error_code (always 0 on R09)
+        //   [3]=value (HR BPM; appears ~28s after start)
+        //   [4-5]=unused
+        //   [6-7]=RR interval LE 16-bit ms (appears ~10s after start)
+        //   [8-14]=unused, [15]=checksum
+        //
+        // R02 compatibility: R02 may use [2]=value, [3]=unused — we check both
+        // byte positions to handle either format transparently.
         let type = b[1]
-        let v = Int(b[2])
-
-        // Skip "no reading" sentinels (0 or status codes). Ring emits these
-        // during the warm-up before first real reading.
-        guard v > 0 else { return }
 
         let now = nowMsUnique()
         switch type {
         case Self.RT_TYPE_HR:
-            // Physiological range 30-220 bpm
-            guard (30...220).contains(v) else { return }
-            realtimeHrSamples.append([
-                "type": "hr",
-                "ts": now,
-                "value": v,
-                "source": "qring_ble",
-                "payload_json": ["mode": "realtime"],
-            ])
-            notifyListeners("realtime", data: ["type": "hr", "value": v])
-
-            // Extract RR interval from bytes[3..4] (LE 16-bit ms)
-            let rrMs = Int(b[3]) | (Int(b[4]) << 8)
+            // Extract RR interval from bytes[6-7] LE (R09 confirmed format)
+            let rrMs = Int(b[6]) | (Int(b[7]) << 8)
             if (300...2000).contains(rrMs) {
                 realtimeRRIntervals.append(rrMs)
                 rrIntervalSamples.append([
@@ -1070,8 +1143,40 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                     "payload_json": ["mode": "realtime", "metric": "rr_ms"],
                 ])
             }
+
+            // Extract HR BPM — try byte[3] first (R09), fallback to byte[2] (R02)
+            let hrR09 = Int(b[3])
+            let hrR02 = Int(b[2])
+            let hr: Int
+            if (30...220).contains(hrR09) {
+                hr = hrR09
+            } else if (30...220).contains(hrR02) {
+                hr = hrR02
+            } else if (300...2000).contains(rrMs) {
+                // Derive HR from RR interval when no direct BPM yet
+                hr = Int(round(60000.0 / Double(rrMs)))
+            } else {
+                return  // warmup — no usable data yet
+            }
+
+            realtimeHrSamples.append([
+                "type": "hr",
+                "ts": now,
+                "value": hr,
+                "source": "qring_ble",
+                "payload_json": [
+                    "mode": "realtime",
+                    "rr_ms": rrMs > 0 ? rrMs as Any : 0 as Any,
+                    "byte2": Int(b[2]),
+                    "byte3": Int(b[3]),
+                ],
+            ])
+            notifyListeners("realtime", data: ["type": "hr", "value": hr])
+
         case Self.RT_TYPE_SPO2:
-            // Physiological range 70-100%
+            // R09 realtime SpO2 returns all zeros (confirmed). Still parse for
+            // forward compatibility if future firmware fixes this.
+            let v = max(Int(b[3]), Int(b[2]))
             guard (70...100).contains(v) else { return }
             realtimeSpo2Samples.append([
                 "type": "spo2",
@@ -1081,9 +1186,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "payload_json": ["mode": "realtime"],
             ])
             notifyListeners("realtime", data: ["type": "spo2", "value": v])
+
         case Self.RT_TYPE_HRV:
-            // HRV RMSSD typically 15-200 ms. Byte layout may be single byte or LE 16-bit
-            // depending on firmware — validate range.
+            // R09 realtime HRV returns all zeros (confirmed). Still parse for
+            // forward compatibility.
+            let v = max(Int(b[3]), Int(b[2]))
             guard (5...250).contains(v) else { return }
             realtimeHrvSamples.append([
                 "type": "hrv",
@@ -1093,6 +1200,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "payload_json": ["mode": "realtime"],
             ])
             notifyListeners("realtime", data: ["type": "hrv", "value": v])
+
         default: break
         }
     }
@@ -1268,13 +1376,43 @@ extension QRingPlugin: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        // If a sync was in progress, flush whatever we collected and resolve
+        // instead of leaving the JS promise hanging forever.
+        if let c = pendingSyncCall {
+            NSLog("[QRing] disconnect during sync — flushing collected data")
+            flushRealtimeBatch(type: "hr", samples: &realtimeHrSamples)
+            flushRealtimeBatch(type: "spo2", samples: &realtimeSpo2Samples)
+            flushRealtimeBatch(type: "hrv", samples: &realtimeHrvSamples)
+            deriveBiomarkers()
+            flushDebugRawBatch(force: true)
+            c.resolve([
+                "hr_count": hrSamples.count,
+                "steps_count": stepsSamples.count,
+                "sleep_count": sleepSamples.count,
+                "spo2_count": spo2Samples.count,
+                "hrv_count": hrvSamples.count,
+                "stress_count": stressSamples.count,
+                "temp_count": tempSamples.count,
+                "rt_hr_count": realtimeHrSamples.count,
+                "rr_count": realtimeRRIntervals.count,
+                "fw_version": firmwareRev ?? "",
+                "disconnected_early": true,
+            ])
+            pendingSyncCall = nil
+        }
         writeChar = nil
+        writeCharV2 = nil
         notifyChar = nil
+        notifyCharV2 = nil
         firmwareRev = nil
         opLock.lock()
         opQueue.removeAll()
         opInFlight = false
         opLock.unlock()
+        opLockV2.lock()
+        opQueueV2.removeAll()
+        opInFlightV2 = false
+        opLockV2.unlock()
         NSLog("[QRing] disconnected: \(error?.localizedDescription ?? "clean")")
     }
 }
