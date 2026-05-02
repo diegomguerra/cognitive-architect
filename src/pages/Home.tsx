@@ -107,7 +107,7 @@ function PillarCard({ name, value, description, index }: { name: string; value: 
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
-  const { state, hasData, userName, actionsTaken, sachetConfirmation, prediction, anomaly, engineMode } = store;
+  const { state, hasData, userName, actionsTaken, sachetConfirmation, prediction, anomaly, engineMode, dataConfidence } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
 
   const interpretation = useMemo(() => interpret(state), [state]);
@@ -214,18 +214,32 @@ const Home = () => {
           </>
         ) : (
           <>
-            {/* ── Badge Calibrando (F6) ── */}
-            {(engineMode === 'bootstrap' || engineMode === 'adaptive') && (
+            {/* ── Badge Confidence / Calibrando (E.2) ── */}
+            {(dataConfidence?.confidence_level === 'low' || dataConfidence?.confidence_level === 'medium' || engineMode === 'bootstrap' || engineMode === 'adaptive') && (
               <div
                 className="flex items-center justify-center gap-2 py-2 rounded-xl"
-                style={{ background: '#0F172A', border: '1px solid #1E3A5F' }}
+                style={{
+                  background: dataConfidence?.confidence_level === 'low' ? '#1A0F00' : '#0F172A',
+                  border: `1px solid ${dataConfidence?.confidence_level === 'low' ? '#3D2000' : '#1E3A5F'}`,
+                }}
               >
                 <div
                   className="w-1.5 h-1.5 rounded-full animate-pulse"
-                  style={{ background: '#60A5FA' }}
+                  style={{ background: dataConfidence?.confidence_level === 'low' ? '#FBBF24' : '#60A5FA' }}
                 />
-                <span className="text-[10px] uppercase" style={{ color: '#60A5FA', letterSpacing: '0.15em', fontWeight: 500 }}>
-                  {engineMode === 'bootstrap' ? 'Calibrando · Coletando dados iniciais' : 'Adaptando · Modelo em calibração'}
+                <span className="text-[10px] uppercase" style={{
+                  color: dataConfidence?.confidence_level === 'low' ? '#FBBF24' : '#60A5FA',
+                  letterSpacing: '0.15em', fontWeight: 500,
+                }}>
+                  {dataConfidence?.display_label
+                    ? dataConfidence.display_label
+                    : dataConfidence?.confidence_level === 'low'
+                      ? 'Calibrando · Coletando mais dados'
+                      : dataConfidence?.confidence_level === 'medium'
+                        ? 'Dados parciais · Confiança média'
+                        : engineMode === 'bootstrap'
+                          ? 'Calibrando · Coletando dados iniciais'
+                          : 'Adaptando · Modelo em calibração'}
                 </span>
               </div>
             )}

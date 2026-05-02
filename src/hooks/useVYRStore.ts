@@ -77,6 +77,7 @@ export function useVYRStore() {
   const [prediction, setPrediction] = useState<VYRPrediction | null>(null);
   const [anomaly, setAnomaly] = useState<VYRAnomaly | null>(null);
   const [dataDays, setDataDays] = useState(0);
+  const [dataConfidence, setDataConfidence] = useState<{ confidence_level: string; display_label: string | null; confidence: number } | null>(null);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -89,7 +90,7 @@ export function useVYRStore() {
     if (!userId) return;
     let { data } = await supabase
       .from('computed_states')
-      .select('day, score, level, pillars, phase')
+      .select('day, score, level, pillars, phase, raw_input')
       .eq('user_id', userId)
       .eq('day', today)
       .maybeSingle();
@@ -127,6 +128,8 @@ export function useVYRStore() {
         phase: (data.phase as VYRState['phase']) || getCurrentPhase(),
       });
       setHasData(true);
+      const ri = (data as any).raw_input;
+      if (ri?.data_confidence) setDataConfidence(ri.data_confidence);
     }
   }, [userId, today]);
 
@@ -197,7 +200,7 @@ export function useVYRStore() {
     setLoading(true);
 
     const [statesRes, actionsRes, checkpointsRes, reviewsRes, integrationRes, nameRes] = await Promise.all([
-      supabase.from('computed_states').select('day, score, level, pillars, phase')
+      supabase.from('computed_states').select('day, score, level, pillars, phase, raw_input')
         .eq('user_id', userId).order('day', { ascending: false }).limit(30),
       supabase.from('action_logs').select('id, action_type, payload, created_at')
         .eq('user_id', userId).eq('day', today),
@@ -274,6 +277,8 @@ export function useVYRStore() {
         phase: (todayEntry.phase as VYRState['phase']) || getCurrentPhase(),
       });
       setHasData(true);
+      const todayRaw = (statesRes.data || []).find((s: any) => s.day === today);
+      if (todayRaw?.raw_input?.data_confidence) setDataConfidence(todayRaw.raw_input.data_confidence);
     }
 
     // Actions
@@ -509,6 +514,7 @@ export function useVYRStore() {
     prediction,
     anomaly,
     dataDays,
+    dataConfidence,
     engineMode: dataDays < 7 ? 'bootstrap' as const : dataDays < 30 ? 'adaptive' as const : 'ml_ready' as const,
     logAction,
     logPerception,

@@ -81,6 +81,26 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let CMD_REALTIME:        UInt8 = 0x69
     private static let CMD_STOP_REALTIME:   UInt8 = 0x6A
 
+    // JStyle X3/X5 Commands (different CMD IDs from Colmi)
+    private static let JS_CMD_SET_TIME:      UInt8 = 0x01  // same as Colmi
+    private static let JS_CMD_SET_USER:      UInt8 = 0x02
+    private static let JS_CMD_REALTIME_PPI:  UInt8 = 0x11  // RR interval stream
+    private static let JS_CMD_BATTERY:       UInt8 = 0x13
+    private static let JS_CMD_REALTIME_TEMP: UInt8 = 0x14  // multi-channel temp
+    private static let JS_CMD_GET_VERSION:   UInt8 = 0x27
+    private static let JS_CMD_MEASUREMENT:   UInt8 = 0x28  // manual HR/SpO2
+    private static let JS_CMD_SET_AUTO:      UInt8 = 0x2A  // auto-monitoring config
+    private static let JS_CMD_GET_AUTO:      UInt8 = 0x2B
+    private static let JS_CMD_GET_TOTAL:     UInt8 = 0x51  // daily step totals
+    private static let JS_CMD_GET_DETAIL:    UInt8 = 0x52  // 10-min activity detail
+    private static let JS_CMD_GET_SLEEP:     UInt8 = 0x53  // sleep history
+    private static let JS_CMD_GET_HR:        UInt8 = 0x54  // continuous HR history
+    private static let JS_CMD_GET_ONCE_HR:   UInt8 = 0x55  // single HR measurements
+    private static let JS_CMD_GET_HRV:       UInt8 = 0x56  // HRV + stress + BP
+    private static let JS_CMD_GET_SPO2:      UInt8 = 0x57  // SpO2 history
+    private static let JS_CMD_GET_TEMP:      UInt8 = 0x62  // temperature history
+    private static let JS_CMD_GET_PPI:       UInt8 = 0x63  // PPI/RRI history
+
     // V2 Commands
     private static let CMD_BIG_DATA_V2:         UInt8 = 0xBC
     private static let BIG_DATA_TYPE_TEMP:      UInt8 = 0x25
@@ -145,6 +165,10 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var realtimeRRIntervals: [Int] = []  // rr_ms from HR realtime packets
     private var rrIntervalSamples: [[String: Any]] = []
     private var debugRawSamples: [[String: Any]] = []
+
+    // JStyle history pagination state
+    private var jsPendingHistoryCmd: UInt8 = 0  // CMD awaiting continuation
+    private var jsHistoryQueue: [UInt8] = []    // remaining history CMDs to request
 
     // V2 temperature packet assembler. V2 responses can span multiple BLE notifications;
     // we accumulate until we have the declared payload length.
@@ -351,6 +375,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         receivedStepsPackets = 0
         // Reset monotonic sample sequence so nudges stay bounded per sync
         sampleSeq = 0
+        jsPendingHistoryCmd = 0
+        jsHistoryQueue.removeAll()
 
         // --- Sync sequence: HISTORY FIRST, then REALTIME ---
         //
@@ -459,6 +485,546 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.pendingSyncCall = nil
             }
             self.notifyListeners("syncEnd", data: ["type": "all"])
+        }
+    }
+
+    // MARK: - JStyle Sync Sequence
+
+    /// JStyle X3/X5 sync — uses JStyle-specific command IDs and pagination protocol.
+    /// History uses mode-based pagination: b[1]=0x00 start, 0x02 continue, 0x99 delete.
+    private func syncJStyle() {
+        // Phase 1: Setup (t+0s)
+        jsSendSetTime()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.jsSendBattery()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            self?.jsSendGetVersion()
+        }
+
+        // Phase 2: Configure auto-monitoring (t+1s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.jsSendAutoMonitoring(dataType: 1, intervalMin: 5)  // HR every 5 min
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in
+            self?.jsSendAutoMonitoring(dataType: 3, intervalMin: 30) // Temp every 30 min
+        }
+
+        // Phase 3: History retrieval (t+2s) — sequential via pagination queue
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            self.jsHistoryQueue = [
+                Self.JS_CMD_GET_HR,     // 0x54 continuous HR
+                Self.JS_CMD_GET_HRV,    // 0x56 HRV + stress
+                Self.JS_CMD_GET_SPO2,   // 0x57 SpO2
+                Self.JS_CMD_GET_TEMP,   // 0x62 temperature
+                Self.JS_CMD_GET_TOTAL,  // 0x51 daily steps
+                Self.JS_CMD_GET_SLEEP,  // 0x53 sleep
+            ]
+            self.jsRequestNextHistory()
+        }
+
+        // Phase 4: Realtime PPI for RR intervals (t+15s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
+            guard self?.pendingSyncCall != nil else { return }
+            self?.jsSendRealtimePPI(enable: true)
+        }
+
+        // Phase 5: Start manual HR measurement (t+16s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 16.0) { [weak self] in
+            guard self?.pendingSyncCall != nil else { return }
+            self?.jsSendMeasurement(type: 2, enable: true, durationSec: 15) // HR for 15s
+        }
+
+        // Phase 6: Resolve (t+35s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 35.0) { [weak self] in
+            guard let self = self else { return }
+            self.jsSendRealtimePPI(enable: false)
+            self.jsSendMeasurement(type: 2, enable: false, durationSec: 0)
+            self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
+            self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
+            self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
+            self.deriveBiomarkers()
+            self.flushDebugRawBatch(force: true)
+
+            if let c = self.pendingSyncCall {
+                c.resolve([
+                    "hr_count": self.hrSamples.count,
+                    "steps_count": self.stepsSamples.count,
+                    "sleep_count": self.sleepSamples.count,
+                    "spo2_count": self.spo2Samples.count,
+                    "hrv_count": self.hrvSamples.count,
+                    "stress_count": self.stressSamples.count,
+                    "temp_count": self.tempSamples.count,
+                    "rt_hr_count": self.realtimeHrSamples.count,
+                    "rr_count": self.realtimeRRIntervals.count,
+                    "fw_version": self.firmwareRev ?? "",
+                    "vendor": self.deviceVendor.rawValue,
+                    "history_enabled": self.historyEnabled,
+                    "debug_raw_enabled": self.debugRawEnabled,
+                ])
+                self.pendingSyncCall = nil
+            }
+            self.notifyListeners("syncEnd", data: ["type": "all"])
+        }
+    }
+
+    /// Request next history command from queue. Called after each history completes.
+    private func jsRequestNextHistory() {
+        guard !jsHistoryQueue.isEmpty else {
+            NSLog("[QRing] JStyle history queue empty — all done")
+            return
+        }
+        let cmd = jsHistoryQueue.removeFirst()
+        jsPendingHistoryCmd = cmd
+        jsSendHistoryRequest(cmd: cmd, mode: 0x00) // mode 0x00 = start
+    }
+
+    /// Send a JStyle history request with pagination mode.
+    private func jsSendHistoryRequest(cmd: UInt8, mode: UInt8) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = cmd
+        pkt[1] = mode  // 0x00=start, 0x02=continue
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    // MARK: - JStyle Command Builders
+
+    private func jsSendSetTime() {
+        let now = Date()
+        let cal = Calendar(identifier: .gregorian)
+        let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_SET_TIME
+        pkt[1] = UInt8(max(0, (c.year ?? 2026) - 2000))
+        pkt[2] = UInt8(c.month ?? 1)
+        pkt[3] = UInt8(c.day ?? 1)
+        pkt[4] = UInt8(c.hour ?? 0)
+        pkt[5] = UInt8(c.minute ?? 0)
+        pkt[6] = UInt8(c.second ?? 0)
+        // b[7] = timezone offset (hours from UTC, signed)
+        let tzOffset = TimeZone.current.secondsFromGMT() / 3600
+        pkt[7] = UInt8(bitPattern: Int8(tzOffset))
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    private func jsSendBattery() {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_BATTERY
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    private func jsSendGetVersion() {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_GET_VERSION
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Configure auto-monitoring on JStyle ring.
+    /// dataType: 1=HR, 2=SpO2, 3=Temp, 4=HRV
+    private func jsSendAutoMonitoring(dataType: UInt8, intervalMin: Int) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_SET_AUTO
+        pkt[1] = 0x01  // enable
+        pkt[2] = 0     // startHour = 00:00
+        pkt[3] = 0     // startMin
+        pkt[4] = 23    // endHour = 23:59
+        pkt[5] = 59    // endMin
+        pkt[6] = 0x7F  // all days (bit0-6 = Sun-Sat)
+        pkt[7] = UInt8(intervalMin & 0xFF)  // intervalLo
+        pkt[8] = UInt8((intervalMin >> 8) & 0xFF) // intervalHi
+        pkt[9] = dataType
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Start/stop realtime PPI (RR interval) streaming.
+    private func jsSendRealtimePPI(enable: Bool) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_REALTIME_PPI
+        pkt[1] = enable ? 0x01 : 0x00
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    /// Start/stop manual measurement (HR, SpO2, etc.)
+    /// type: 2=HR, 3=SpO2, 4=ContSpO2
+    private func jsSendMeasurement(type: UInt8, enable: Bool, durationSec: Int) {
+        var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+        pkt[0] = Self.JS_CMD_MEASUREMENT
+        pkt[1] = type
+        pkt[2] = enable ? 0x01 : 0x00
+        pkt[4] = UInt8(durationSec & 0xFF)
+        pkt[5] = UInt8((durationSec >> 8) & 0xFF)
+        pkt[15] = checksum(pkt)
+        queueWrite(Data(pkt))
+    }
+
+    // MARK: - JStyle Notify Parser
+
+    private func handleJStyleNotify(_ b: [UInt8], hex: String) {
+        let cmd = b[0]
+        let endFlag = b.count >= 16 ? b[b.count - 2] : 0  // second-to-last byte before CRC
+
+        switch cmd {
+        case Self.JS_CMD_BATTERY:
+            let pct = Int(b[1])
+            NSLog("[QRing] JStyle battery: %d%%", pct)
+            notifyListeners("battery", data: ["battery": pct, "charging": false])
+
+        case Self.JS_CMD_GET_VERSION:
+            // Version string in bytes 1..N
+            let verBytes = Array(b[1..<min(b.count-1, 15)]).filter { $0 != 0 }
+            if let ver = String(bytes: verBytes, encoding: .utf8) {
+                firmwareRev = ver
+                NSLog("[QRing] JStyle firmware: %@", ver)
+                notifyListeners("firmwareRev", data: ["fwVersion": ver])
+            }
+
+        case Self.JS_CMD_SET_TIME:
+            NSLog("[QRing] JStyle set-time ack")
+
+        case Self.JS_CMD_SET_AUTO:
+            NSLog("[QRing] JStyle auto-monitoring ack")
+
+        case Self.JS_CMD_GET_HR:  // 0x54 — continuous HR history
+            parseJStyleHR(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("hr", &hrSamples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_HR {
+                // More data available — request continuation
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_HR, mode: 0x02)
+            }
+
+        case Self.JS_CMD_GET_HRV:  // 0x56 — HRV + stress
+            parseJStyleHRV(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("hrv", &hrvSamples)
+                flushJStyleType("stress", &stressSamples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_HRV {
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_HRV, mode: 0x02)
+            }
+
+        case Self.JS_CMD_GET_SPO2:  // 0x57
+            parseJStyleSpO2(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("spo2", &spo2Samples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_SPO2 {
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_SPO2, mode: 0x02)
+            }
+
+        case Self.JS_CMD_GET_TEMP:  // 0x62
+            parseJStyleTemp(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("temp", &tempSamples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_TEMP {
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_TEMP, mode: 0x02)
+            }
+
+        case Self.JS_CMD_GET_TOTAL:  // 0x51 — daily steps
+            parseJStyleSteps(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("steps", &stepsSamples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_TOTAL {
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_TOTAL, mode: 0x02)
+            }
+
+        case Self.JS_CMD_GET_SLEEP:  // 0x53
+            parseJStyleSleep(b)
+            if endFlag == 1 || b[1] == 0xFF {
+                flushJStyleType("sleep", &sleepSamples)
+                jsRequestNextHistory()
+            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_SLEEP {
+                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_SLEEP, mode: 0x02)
+            }
+
+        case Self.JS_CMD_REALTIME_PPI:  // 0x11 — PPI/RRI realtime
+            parseJStylePPI(b)
+
+        case Self.JS_CMD_MEASUREMENT:  // 0x28 — manual HR/SpO2 result
+            parseJStyleMeasurement(b)
+
+        case Self.JS_CMD_REALTIME_TEMP:  // 0x14
+            parseJStyleRealtimeTemp(b)
+
+        default:
+            NSLog("[QRing] JStyle unhandled cmd 0x%02X", cmd)
+        }
+    }
+
+    private func flushJStyleType(_ type: String, _ samples: inout [[String: Any]]) {
+        guard !samples.isEmpty else {
+            notifyListeners("syncEnd", data: ["type": type])
+            return
+        }
+        notifyListeners("syncData", data: ["type": type, "samples": samples])
+        notifyListeners("syncEnd", data: ["type": type])
+        NSLog("[QRing] JStyle flushed %d %@ samples", samples.count, type)
+        samples.removeAll()
+    }
+
+    // MARK: - JStyle History Parsers
+
+    /// Parse JStyle continuous HR (0x54). Each record: date(6 bytes) + 15 HR values.
+    private func parseJStyleHR(_ b: [UInt8]) {
+        guard b.count >= 8 else { return }
+        if b[1] == 0xFF { return }  // empty/end marker
+
+        // Date: b[1]=year-2000, b[2]=month, b[3]=day, b[4]=hour, b[5]=min, b[6]=sec
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        comps.hour = Int(b[4])
+        comps.minute = Int(b[5])
+        comps.second = Int(b[6])
+        guard let baseDate = cal.date(from: comps) else { return }
+        let baseSec = baseDate.timeIntervalSince1970
+
+        // HR values start at b[7], each 1 byte = 1-min reading
+        for i in 7..<min(b.count - 1, 22) {  // up to 15 values, skip CRC byte
+            let hr = Int(b[i])
+            if hr == 0 || !(30...220).contains(hr) { continue }
+            let tsSec = baseSec + Double(i - 7) * 60  // 1-min intervals
+            hrSamples.append([
+                "type": "hr",
+                "ts": tsSec * 1000,
+                "value": hr,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_history"],
+            ])
+        }
+    }
+
+    /// Parse JStyle HRV (0x56). Contains HRV, stress, HR, BP.
+    private func parseJStyleHRV(_ b: [UInt8]) {
+        guard b.count >= 10 else { return }
+        if b[1] == 0xFF { return }
+
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        comps.hour = Int(b[4])
+        comps.minute = Int(b[5])
+        comps.second = Int(b[6])
+        guard let date = cal.date(from: comps) else { return }
+        let tsMs = date.timeIntervalSince1970 * 1000
+
+        let hrv = Int(b[7])
+        let stress = Int(b[8])
+        let hr = Int(b[9])
+
+        if (5...250).contains(hrv) {
+            hrvSamples.append([
+                "type": "hrv",
+                "ts": tsMs,
+                "value": hrv,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_history"],
+            ])
+        }
+        if (1...100).contains(stress) {
+            stressSamples.append([
+                "type": "stress",
+                "ts": tsMs + 1,
+                "value": stress,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_history"],
+            ])
+        }
+        if (30...220).contains(hr) {
+            realtimeHrSamples.append([
+                "type": "hr",
+                "ts": tsMs + 2,
+                "value": hr,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_hrv_record"],
+            ])
+        }
+    }
+
+    /// Parse JStyle SpO2 (0x57).
+    private func parseJStyleSpO2(_ b: [UInt8]) {
+        guard b.count >= 8 else { return }
+        if b[1] == 0xFF { return }
+
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        comps.hour = Int(b[4])
+        comps.minute = Int(b[5])
+        comps.second = Int(b[6])
+        guard let date = cal.date(from: comps) else { return }
+
+        let spo2 = Int(b[7])
+        if (70...100).contains(spo2) {
+            spo2Samples.append([
+                "type": "spo2",
+                "ts": date.timeIntervalSince1970 * 1000,
+                "value": spo2,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_history"],
+            ])
+        }
+    }
+
+    /// Parse JStyle temperature history (0x62).
+    private func parseJStyleTemp(_ b: [UInt8]) {
+        guard b.count >= 9 else { return }
+        if b[1] == 0xFF { return }
+
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        comps.hour = Int(b[4])
+        comps.minute = Int(b[5])
+        comps.second = Int(b[6])
+        guard let date = cal.date(from: comps) else { return }
+
+        // Temperature LE16 in 0.1C
+        let rawTemp = Int(b[7]) | (Int(b[8]) << 8)
+        let celsius = Double(rawTemp) / 10.0
+        if (25.0...42.0).contains(celsius) {
+            tempSamples.append([
+                "type": "temp",
+                "ts": date.timeIntervalSince1970 * 1000,
+                "value": celsius,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_history"],
+            ])
+        }
+    }
+
+    /// Parse JStyle daily steps (0x51).
+    private func parseJStyleSteps(_ b: [UInt8]) {
+        guard b.count >= 10 else { return }
+        if b[1] == 0xFF { return }
+
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        guard let date = cal.date(from: comps) else { return }
+
+        // Steps LE32 in b[4..7]
+        let steps = Int(b[4]) | (Int(b[5]) << 8) | (Int(b[6]) << 16) | (Int(b[7]) << 24)
+        if steps > 0 && steps < 100000 {
+            stepsSamples.append([
+                "type": "steps",
+                "ts": date.timeIntervalSince1970 * 1000,
+                "value": steps,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_daily_total"],
+            ])
+        }
+    }
+
+    /// Parse JStyle sleep data (0x53).
+    private func parseJStyleSleep(_ b: [UInt8]) {
+        guard b.count >= 8 else { return }
+        if b[1] == 0xFF { return }
+
+        let cal = Calendar(identifier: .gregorian)
+        var comps = DateComponents()
+        comps.year = 2000 + Int(b[1])
+        comps.month = Int(b[2])
+        comps.day = Int(b[3])
+        comps.hour = Int(b[4])
+        comps.minute = Int(b[5])
+        guard let date = cal.date(from: comps) else { return }
+
+        // Sleep quality code: 1=deep, 2=light, 3=REM, other=awake
+        let quality = Int(b[6])
+        let qualityLabel: String
+        switch quality {
+        case 1: qualityLabel = "deep"
+        case 2: qualityLabel = "light"
+        case 3: qualityLabel = "rem"
+        default: qualityLabel = "awake"
+        }
+
+        sleepSamples.append([
+            "type": "sleep",
+            "ts": date.timeIntervalSince1970 * 1000,
+            "value": quality,
+            "source": "qring_ble",
+            "payload_json": ["mode": "jstyle_history", "quality": qualityLabel],
+        ])
+    }
+
+    /// Parse JStyle realtime PPI/RRI (0x11).
+    private func parseJStylePPI(_ b: [UInt8]) {
+        // b[1..2] = RRI in ms (LE16)
+        guard b.count >= 3 else { return }
+        let rri = Int(b[1]) | (Int(b[2]) << 8)
+        if (300...2000).contains(rri) {
+            realtimeRRIntervals.append(rri)
+            rrIntervalSamples.append([
+                "type": "rr_interval",
+                "ts": nowMsUnique(),
+                "value": rri,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_realtime_ppi"],
+            ])
+        }
+    }
+
+    /// Parse JStyle manual measurement result (0x28).
+    private func parseJStyleMeasurement(_ b: [UInt8]) {
+        guard b.count >= 4 else { return }
+        let mType = b[1]  // 2=HR, 3=SpO2
+        let value = Int(b[3])
+
+        if mType == 2 && (30...220).contains(value) {
+            realtimeHrSamples.append([
+                "type": "hr",
+                "ts": nowMsUnique(),
+                "value": value,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_measurement"],
+            ])
+            notifyListeners("realtime", data: ["type": "hr", "value": value])
+        } else if mType == 3 && (70...100).contains(value) {
+            realtimeSpo2Samples.append([
+                "type": "spo2",
+                "ts": nowMsUnique(),
+                "value": value,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_measurement"],
+            ])
+        }
+    }
+
+    /// Parse JStyle realtime temperature (0x14).
+    private func parseJStyleRealtimeTemp(_ b: [UInt8]) {
+        guard b.count >= 3 else { return }
+        let rawTemp = Int(b[1]) | (Int(b[2]) << 8)
+        let celsius = Double(rawTemp) / 10.0
+        if (25.0...42.0).contains(celsius) {
+            tempSamples.append([
+                "type": "temp",
+                "ts": nowMsUnique(),
+                "value": celsius,
+                "source": "qring_ble",
+                "payload_json": ["mode": "jstyle_realtime"],
+            ])
         }
     }
 
@@ -1676,9 +2242,18 @@ extension QRingPlugin: CBPeripheralDelegate {
             }
             return
         }
-        // Route V1 vs V2 notifications — V2 uses big-data framing (temperature etc.)
+        // Route V1 vs V2 vs JStyle notifications
         if characteristic.uuid == Self.notifyUUIDv2 || characteristic == notifyCharV2 {
             handleNotifyV2(data)
+        } else if deviceVendor == .jstyle {
+            let hex = data.map { String(format: "%02X", $0) }.joined(separator: " ")
+            lastNotifyHex = hex
+            notifiesReceived += 1
+            NSLog("[QRing] NOTIFY JStyle %@", hex)
+            emitDebug()
+            emitDebugRaw(channel: "v1", hex: hex)
+            guard data.count >= 2 else { return }
+            handleJStyleNotify([UInt8](data), hex: hex)
         } else {
             handleNotify(data)
         }
