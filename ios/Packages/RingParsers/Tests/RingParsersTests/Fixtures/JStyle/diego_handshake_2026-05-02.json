@@ -1,0 +1,36 @@
+{
+  "fixture_name": "diego_handshake_2026-05-02",
+  "vendor": "jstyle",
+  "user_id": "955c3cbb-acf0-464d-951f-ad05db653ca9",
+  "user_email": "dmarcondesguerra@gmail.com",
+  "session_start_iso": "2026-05-02T11:47:02.123Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App project",
+  "notes": "Full JStyle handshake observed during a connect attempt: ack 0x01, battery 0x03 (returns 0 on JStyle), long 0x3A, CMDs 0x2C/0x16/0x37 (all returning ack stubs, NOT data), then initial stress 0x37 0x99 (real data: stress=88 and stress=95). Then HR history request 0x15 returns generic ack `15 00 00 ...` (NO data). Parser must NOT extract any HR from these packets.",
+  "expected": {
+    "stress": {
+      "min_count": 2,
+      "value_range": [80, 100],
+      "all_mode": "initial",
+      "comment": "Two valid initial stress samples from CMD 0x37 0x99 packets: 0x58=88 and 0x5F=95"
+    },
+    "hr": {
+      "max_count": 0,
+      "comment": "ZERO HR samples expected — handshake/ack packets contain no HR. Previous parser incorrectly read 0x15 ack as Colmi HR history producing garbage values."
+    },
+    "rr_interval": { "max_count": 0 },
+    "temp": { "max_count": 0 }
+  },
+  "packets": [
+    { "ts_offset_ms":     0, "channel": "v1", "raw_hex": "01 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 F5" },
+    { "ts_offset_ms":   196, "channel": "v1", "raw_hex": "03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03" },
+    { "ts_offset_ms":   380, "channel": "v1", "raw_hex": "3A 03 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00" },
+    { "ts_offset_ms":   591, "channel": "v1", "raw_hex": "37 99 42 B2 01 5F 00 19 00 00 00 00 00 00 00 3D" },
+    { "ts_offset_ms":   608, "channel": "v1", "raw_hex": "16 02 00 00 00 00 00 00 00 00 00 00 00 00 00 18" },
+    { "ts_offset_ms":   860, "channel": "v1", "raw_hex": "2C 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00" },
+    { "ts_offset_ms":  1042, "channel": "v1", "raw_hex": "37 13 00 01 00 00 00 00 00 00 00 00 00 00 00 4B" },
+    { "ts_offset_ms":  1597, "channel": "v1", "raw_hex": "37 99 42 B2 01 58 00 13 00 00 00 00 00 00 00 30" },
+    { "ts_offset_ms":  2788, "channel": "v1", "raw_hex": "2C 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00" },
+    { "ts_offset_ms":  2894, "channel": "v1", "raw_hex": "37 13 00 01 00 00 00 00 00 00 00 00 00 00 00 4B" },
+    { "ts_offset_ms":  3225, "channel": "v1", "raw_hex": "15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 15" }
+  ]
+}

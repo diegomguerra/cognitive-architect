@@ -1,0 +1,41 @@
+{
+  "fixture_name": "diego_stress_stream_2026-05-02",
+  "vendor": "jstyle",
+  "user_id": "955c3cbb-acf0-464d-951f-ad05db653ca9",
+  "user_email": "dmarcondesguerra@gmail.com",
+  "session_start_iso": "2026-05-02T11:47:11.744Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App project",
+  "notes": "JStyle stress streaming CMD 0x37 b[1]=0x88 — counter 0x00..0x11, stress varies 0x44-0x46 (68-70). Bytes[10]=0x88 0x01 are CONSTANT product header, NOT heart rate. Previous parser bug emitted HR=136 from b[10] for every packet. Expected: ZERO HR samples from these packets.",
+  "expected": {
+    "stress": {
+      "min_count": 16,
+      "value_range": [60, 80],
+      "all_mode": "streaming"
+    },
+    "hr": {
+      "max_count": 0,
+      "comment": "BUG FIX: stress stream packets do NOT contain HR. Previous parser invented HR=136 from constant b[10]=0x88. Must be ZERO."
+    },
+    "rr_interval": { "max_count": 0 }
+  },
+  "packets": [
+    { "ts_offset_ms":     0, "channel": "v1", "raw_hex": "37 88 00 00 01 45 00 00 00 00 88 01 00 00 00 8E" },
+    { "ts_offset_ms":  1008, "channel": "v1", "raw_hex": "37 88 00 01 01 45 00 00 00 00 88 01 00 00 00 8F" },
+    { "ts_offset_ms":  2001, "channel": "v1", "raw_hex": "37 88 00 02 01 45 00 00 00 00 88 01 00 00 00 90" },
+    { "ts_offset_ms":  3009, "channel": "v1", "raw_hex": "37 88 00 03 01 45 00 00 00 00 88 01 00 00 00 91" },
+    { "ts_offset_ms":  4017, "channel": "v1", "raw_hex": "37 88 00 04 01 45 00 00 00 00 88 01 00 00 00 92" },
+    { "ts_offset_ms":  5010, "channel": "v1", "raw_hex": "37 88 00 05 01 45 00 00 00 00 88 01 00 00 00 93" },
+    { "ts_offset_ms":  6026, "channel": "v1", "raw_hex": "37 88 00 06 01 45 00 00 00 00 88 01 00 00 00 94" },
+    { "ts_offset_ms":  7035, "channel": "v1", "raw_hex": "37 88 00 07 01 45 00 00 00 00 88 01 00 00 00 95" },
+    { "ts_offset_ms":  8027, "channel": "v1", "raw_hex": "37 88 00 08 01 45 00 00 00 00 88 01 00 00 00 96" },
+    { "ts_offset_ms":  9035, "channel": "v1", "raw_hex": "37 88 00 09 01 45 00 00 00 00 88 01 00 00 00 97" },
+    { "ts_offset_ms": 10037, "channel": "v1", "raw_hex": "37 88 00 0A 01 45 00 00 00 00 88 01 00 00 00 98" },
+    { "ts_offset_ms": 11029, "channel": "v1", "raw_hex": "37 88 00 0B 01 45 00 00 00 00 88 01 00 00 00 99" },
+    { "ts_offset_ms": 12036, "channel": "v1", "raw_hex": "37 88 00 0C 01 45 00 00 00 00 88 01 00 00 00 9A" },
+    { "ts_offset_ms": 13045, "channel": "v1", "raw_hex": "37 88 00 0D 01 44 00 00 00 00 88 01 00 00 00 9A" },
+    { "ts_offset_ms": 14037, "channel": "v1", "raw_hex": "37 88 00 0E 01 45 00 00 00 00 88 01 00 00 00 9C" },
+    { "ts_offset_ms": 15045, "channel": "v1", "raw_hex": "37 88 00 0F 01 45 00 00 00 00 88 01 00 00 00 9D" },
+    { "ts_offset_ms": 16053, "channel": "v1", "raw_hex": "37 88 00 10 01 45 00 00 00 00 88 01 00 00 00 9E" },
+    { "ts_offset_ms": 17046, "channel": "v1", "raw_hex": "37 88 00 11 01 44 00 00 00 00 88 01 00 00 00 9E" }
+  ]
+}

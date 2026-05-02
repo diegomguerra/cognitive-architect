@@ -1,0 +1,21 @@
+{
+  "fixture_name": "lidia_temp_v2_2026-04-30",
+  "vendor": "jstyle",
+  "user_id": "e232cc43-407c-4aec-b084-2c7035d4e2c2",
+  "user_email": "lilidoces@icloud.com",
+  "session_start_iso": "2026-04-30T16:11:21.077Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App project",
+  "notes": "V2 big-data temperature payload (CMD 0xBC 0x25). 57-byte assembled packet. Header: BC 25 32 00 BB AE = length 0x0032 = 50 bytes payload. Then days_ago byte (0x00) + 0x1E separator + 48 half-hour temperature bytes. temp_c = (byte/10)+20.",
+  "expected": {
+    "temp": {
+      "min_count": 30,
+      "value_range_celsius": [33.5, 38.0],
+      "all_mode": "history"
+    },
+    "hr": { "max_count": 0 },
+    "stress": { "max_count": 0 }
+  },
+  "packets": [
+    { "ts_offset_ms": 0, "channel": "v2", "raw_hex": "BC 25 32 00 BB AE 00 1E 00 A2 A5 A3 A5 A7 AB A7 A6 A0 A0 A3 A6 A7 A8 A8 A7 A8 A8 A7 A9 A8 A9 A8 A9 A8 A8 A6 A7 A8 A9 A9 A9 A0 A1 00 A1 A1 A2 9F 9D 9D 9D 9E 9F 00 00 00" }
+  ]
+}

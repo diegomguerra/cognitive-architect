@@ -1,0 +1,39 @@
+{
+  "fixture_name": "lidia_realtime_2026-05-01",
+  "vendor": "jstyle",
+  "user_id": "e232cc43-407c-4aec-b084-2c7035d4e2c2",
+  "user_email": "lilidoces@icloud.com",
+  "session_start_iso": "2026-05-01T20:05:05.611Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App project",
+  "notes": "Realtime CMD 0x69 stream working correctly. JStyle ring fills bytes[6-7] with RR LE16 ms; bytes[3]=0 always; HR derived from RR. 13 packets covering handshake (2F/01/03/3A/16/2C/37FF) + 5 realtime HR samples.",
+  "expected": {
+    "hr": {
+      "min_count": 5,
+      "value_range_bpm": [60, 100],
+      "all_mode": "realtime"
+    },
+    "rr_interval": {
+      "min_count": 5,
+      "value_range_ms": [600, 900],
+      "all_mode": "realtime"
+    },
+    "hr_history": { "max_count": 0, "comment": "JStyle does not implement V1 HR history (cmd 0x15) — must be 0" },
+    "spo2_history": { "max_count": 0, "comment": "JStyle does not implement V1 SpO2 history (cmd 0x2C) — must be 0" },
+    "hrv_history": { "max_count": 0, "comment": "JStyle does not implement V1 HRV history (cmd 0x39) — must be 0" }
+  },
+  "packets": [
+    { "ts_offset_ms":     0, "channel": "v1", "raw_hex": "2F F4 00 00 00 00 00 00 00 00 00 00 00 00 00 23" },
+    { "ts_offset_ms":     2, "channel": "v1", "raw_hex": "01 01 00 00 02 00 00 00 00 01 00 20 00 00 30 55" },
+    { "ts_offset_ms":    92, "channel": "v1", "raw_hex": "03 2C 00 00 00 00 00 00 00 00 00 00 00 00 00 2F" },
+    { "ts_offset_ms":   229, "channel": "v1", "raw_hex": "69 01 00 00 00 00 1C 03 00 00 00 00 00 00 00 89" },
+    { "ts_offset_ms":   276, "channel": "v1", "raw_hex": "3A 03 02 01 00 00 00 00 00 00 00 00 00 00 00 40" },
+    { "ts_offset_ms":   546, "channel": "v1", "raw_hex": "16 02 01 00 00 00 00 00 00 00 00 00 00 00 00 19" },
+    { "ts_offset_ms":   728, "channel": "v1", "raw_hex": "69 01 00 00 00 00 44 03 00 00 00 00 00 00 00 B1" },
+    { "ts_offset_ms":   776, "channel": "v1", "raw_hex": "2C 02 01 1E 00 00 00 00 00 00 00 00 00 00 00 4D" },
+    { "ts_offset_ms":  1048, "channel": "v1", "raw_hex": "37 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 36" },
+    { "ts_offset_ms":  1230, "channel": "v1", "raw_hex": "69 01 00 00 00 00 1B 03 00 00 00 00 00 00 00 88" },
+    { "ts_offset_ms":  1855, "channel": "v1", "raw_hex": "69 01 00 00 00 00 1B 03 00 00 00 00 00 00 00 88" },
+    { "ts_offset_ms":  2270, "channel": "v1", "raw_hex": "69 01 00 00 00 00 02 03 00 00 00 00 00 00 00 6F" },
+    { "ts_offset_ms":  2768, "channel": "v1", "raw_hex": "69 01 00 00 00 00 FC 02 00 00 00 00 00 00 00 68" }
+  ]
+}

@@ -54,9 +54,17 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let writeUUIDv2   = CBUUID(string: "DE5BF72A-D711-4E47-AF26-65E3012A5DC7")
     private static let notifyUUIDv2  = CBUUID(string: "DE5BF729-D711-4E47-AF26-65E3012A5DC7")
 
+    // JStyle X3/X5 Ring — FFF0 service, FFF6 write, FFF7 notify
+    // Same CMD IDs as Colmi but variable-length responses
+    private static let jstyleServiceUUID = CBUUID(string: "FFF0")
+    private static let jstyleWriteUUID   = CBUUID(string: "FFF6")
+    private static let jstyleNotifyUUID  = CBUUID(string: "FFF7")
+
     // Standard Device Info Service
     private static let deviceInfoServiceUUID = CBUUID(string: "180A")
     private static let firmwareRevUUID       = CBUUID(string: "2A26")
+
+    private enum DeviceVendor: String { case colmi, jstyle, unknown }
 
     // V1 Commands
     private static let CMD_SET_TIME:        UInt8 = 0x01
@@ -94,6 +102,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     // MARK: - State
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
+    private var deviceVendor: DeviceVendor = .unknown
     private var writeChar: CBCharacteristic?
     private var notifyChar: CBCharacteristic?
     // V2 characteristics (temperature). Optional — not all rings have them.
@@ -230,7 +239,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 "name": name,
                 "mac": id,
                 "rssi": 0,
-                "vendor": "colmi",
+                "vendor": inferVendor(from: name).rawValue,
                 "model": inferModel(from: name),
                 "saved": true,
             ])
@@ -262,6 +271,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         isScanning = false
         peripheral = p
         p.delegate = self
+        deviceVendor = inferVendor(from: p.name ?? "")
         UserDefaults.standard.set(deviceId, forKey: Self.LS_LAST_DEVICE_ID)
         // autoConnect via NotifyOnConnection — keeps trying even if ring drops
         central.connect(p, options: [
@@ -293,6 +303,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             central.cancelPeripheralConnection(p)
         }
         peripheral = nil
+        deviceVendor = .unknown
         writeChar = nil
         notifyChar = nil
         firmwareRev = nil
@@ -375,9 +386,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
 
-        // Phase 2: V2 Temperature history (separate BLE channel, non-blocking)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.sendTemperatureHistoryRequest()
+        // Phase 2: V2 Temperature history (Colmi only â JStyle has no V2 channel)
+        if deviceVendor != .jstyle {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.sendTemperatureHistoryRequest()
+            }
         }
 
         // Phase 3: V1 History commands — primary data source
@@ -436,6 +449,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                     "fw_version": self.firmwareRev ?? "",
                     "history_enabled": self.historyEnabled,
                     "debug_raw_enabled": self.debugRawEnabled,
+                    "vendor": self.deviceVendor.rawValue,
                 ])
                 self.pendingSyncCall = nil
             }
@@ -635,6 +649,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func isHrvSupported() -> Bool {
+        if deviceVendor == .jstyle { return true }
         guard let fw = firmwareRev else { return false }
         let parts = fw.split(separator: ".").compactMap { Int($0) }
         guard parts.count >= 3 else { return false }
@@ -781,8 +796,32 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         default: break
         }
 
+        // Vendor gate: V1 history commands (0x15/0x2C/0x39/0x43/0x44) use the
+        // Colmi protocol layout. JStyle responds to these CMDs with generic
+        // ack/error stubs (e.g. `15 00 00 ...`, `2C 02 01 1E 00 ...`) that DO
+        // NOT carry data — running Colmi parsers on them produces garbage.
+        // Verified bug: 54 bogus HR samples (values 34-242) appeared on
+        // lilidoces@icloud.com between 2026-04-27 and 2026-04-30 from
+        // exactly this cross-vendor parser leak.
+        //
+        // CMD_STRESS_HIST (0x37) is the exception — it has JStyle-specific
+        // sub-types (b[1]=0x88/0x99/0xEA/0xFF) handled inside parseStressHistory.
+        if deviceVendor == .jstyle {
+            switch cmd {
+            case Self.CMD_HR_HISTORY,
+                 Self.CMD_SPO2_HISTORY,
+                 Self.CMD_HRV_HISTORY,
+                 Self.CMD_STEPS_HIST,
+                 Self.CMD_SLEEP_HIST:
+                NSLog("[QRing] gate: CMD 0x%02X is Colmi-only — JStyle response ignored", cmd)
+                return
+            case Self.CMD_STRESS_HIST: parseStressHistory(bytes); return
+            default: break
+            }
+        }
+
         // Auto-measurement ack responses (sub-cmd 0x02) are always parsed
-        // regardless of historyEnabled flag
+        // regardless of historyEnabled flag (Colmi path).
         switch cmd {
         case Self.CMD_SPO2_HISTORY: parseSpo2History(bytes); return
         case Self.CMD_STRESS_HIST:  parseStressHistory(bytes); return
@@ -790,7 +829,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         default: break
         }
 
-        // History data parsers (gated by historyEnabled flag)
+        // History data parsers (gated by historyEnabled flag) — Colmi only.
         if historyEnabled {
             switch cmd {
             case Self.CMD_HR_HISTORY:   parseHrHistory(bytes)
@@ -917,6 +956,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func parseBattery(_ b: [UInt8]) {
+        // JStyle returns 03 00 00... â battery not available via this CMD
+        if deviceVendor == .jstyle && b[1] == 0 && b[2] == 0 {
+            NSLog("[QRing] JStyle battery CMD not supported")
+            return
+        }
         let pct = Int(b[1])
         let charging = b[2] == 0x01
         notifyListeners("battery", data: ["battery": pct, "charging": charging])
@@ -1077,6 +1121,60 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             NSLog("[QRing] Stress auto-measurement enable ack")
             return
         }
+
+        // JStyle streaming: `37 88 00 [counter] 01 [stress] 00 00 00 00 88 01 00 00 00 [cks]`
+        //
+        // Verified across 51 packets (Diego 2026-05-01) and 18 packets
+        // (Diego 2026-05-02): bytes [10]=0x88 and [11]=0x01 are CONSTANT
+        // product-header markers, NOT heart rate. Previous code emitted
+        // HR=136 spammed for every stress packet — that was a parser bug.
+        // **HR is not present in this packet family.** Stress is at b[5].
+        if b[1] == 0x88 && deviceVendor == .jstyle {
+            let stress = Int(b[5])
+            let counter = Int(b[3])
+            if (1...200).contains(stress) {
+                stressSamples.append([
+                    "type": "stress",
+                    "ts": nowMsUnique(),
+                    "value": stress,
+                    "source": "qring_ble",
+                    "payload_json": ["mode": "jstyle_stress_stream", "counter": counter],
+                ])
+            }
+            if stressSamples.count >= 10 {
+                notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
+                stressSamples.removeAll()
+            }
+            return
+        }
+
+        // JStyle initial stress: 37 99 00 00 01 [value] 00 EA ...
+        if b[1] == 0x99 && deviceVendor == .jstyle {
+            let stress = Int(b[5])
+            if (1...200).contains(stress) {
+                stressSamples.append([
+                    "type": "stress",
+                    "ts": nowMsUnique(),
+                    "value": stress,
+                    "source": "qring_ble",
+                    "payload_json": ["mode": "jstyle_initial"],
+                ])
+            }
+            return
+        }
+
+        // JStyle end marker: 37 EA FF 01 ...
+        if b[1] == 0xEA && deviceVendor == .jstyle {
+            NSLog("[QRing] JStyle stress end/no-history marker")
+            if !stressSamples.isEmpty {
+                notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
+                notifyListeners("syncEnd", data: ["type": "stress"])
+                stressSamples.removeAll()
+            }
+            return
+        }
+
+        // Colmi: value in b[2]
         let v = Int(b[2])
         if (1...100).contains(v) {
             stressSamples.append([
@@ -1324,6 +1422,8 @@ extension QRingPlugin: CBCentralManagerDelegate {
         let looksLikeRing = upper.contains("R02") || upper.contains("R03")
             || upper.contains("R06") || upper.contains("R09") || upper.contains("R10")
             || upper.contains("COLMI") || upper.contains("QRING") || upper.contains("RING")
+            || upper.contains("JSTYLE") || upper.contains("J-STYLE")
+            || upper.contains("X3") || upper.contains("X5") || upper.contains("JCVITAL")
 
         let services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map { $0.uuidString } ?? []
         let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map { $0.uuidString } ?? []
@@ -1338,7 +1438,7 @@ extension QRingPlugin: CBCentralManagerDelegate {
             "name": name,
             "mac": id,
             "rssi": RSSI.intValue,
-            "vendor": "colmi",
+            "vendor": inferVendor(from: name).rawValue,
             "model": inferModel(from: name),
             "advertisedServices": services,
             "overflowServices": overflow,
@@ -1355,7 +1455,23 @@ extension QRingPlugin: CBCentralManagerDelegate {
         if n.contains("R06") { return "R06" }
         if n.contains("R09") { return "R09" }
         if n.contains("R10") { return "R10" }
-        return "R02"
+        if n.contains("X3")  { return "X3" }
+        if n.contains("X5")  { return "X5" }
+        if n.contains("JCVITAL") || n.contains("V5") { return "V5" }
+        return "unknown"
+    }
+
+    private func inferVendor(from name: String) -> DeviceVendor {
+        let n = name.uppercased()
+        if n.contains("COLMI") || n.contains("QRING") || n.contains("R02")
+            || n.contains("R03") || n.contains("R06") || n.contains("R09") || n.contains("R10") {
+            return .colmi
+        }
+        if n.contains("JSTYLE") || n.contains("J-STYLE") || n.contains("X3")
+            || n.contains("X5") || n.contains("JCVITAL") || n.contains("V5") {
+            return .jstyle
+        }
+        return .unknown
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -1400,6 +1516,7 @@ extension QRingPlugin: CBCentralManagerDelegate {
             ])
             pendingSyncCall = nil
         }
+        deviceVendor = .unknown
         writeChar = nil
         writeCharV2 = nil
         notifyChar = nil
@@ -1433,6 +1550,10 @@ extension QRingPlugin: CBPeripheralDelegate {
         for service in peripheral.services ?? [] {
             if service.uuid == Self.serviceUUID {
                 peripheral.discoverCharacteristics([Self.writeUUID, Self.notifyUUID], for: service)
+            } else if service.uuid == Self.jstyleServiceUUID {
+                // JStyle X3/X5 ring â FFF0 service with FFF6 write, FFF7 notify
+                if deviceVendor == .unknown { deviceVendor = .jstyle }
+                peripheral.discoverCharacteristics([Self.jstyleWriteUUID, Self.jstyleNotifyUUID], for: service)
             } else if service.uuid == Self.serviceUUIDv2 {
                 // V2 "big data" service (temperature on R09)
                 peripheral.discoverCharacteristics([Self.writeUUIDv2, Self.notifyUUIDv2], for: service)
@@ -1462,11 +1583,18 @@ extension QRingPlugin: CBPeripheralDelegate {
             switch char.uuid {
             case Self.writeUUID:
                 writeChar = char
-                NSLog("[QRing] V1 writeChar set")
+                NSLog("[QRing] V1 writeChar set (Colmi)")
             case Self.notifyUUID:
                 notifyChar = char
                 peripheral.setNotifyValue(true, for: char)
-                NSLog("[QRing] V1 notifyChar set + subscribed")
+                NSLog("[QRing] V1 notifyChar set + subscribed (Colmi)")
+            case Self.jstyleWriteUUID:
+                writeChar = char
+                NSLog("[QRing] writeChar set (JStyle FFF6)")
+            case Self.jstyleNotifyUUID:
+                notifyChar = char
+                peripheral.setNotifyValue(true, for: char)
+                NSLog("[QRing] notifyChar set + subscribed (JStyle FFF7)")
             case Self.writeUUIDv2:
                 writeCharV2 = char
                 NSLog("[QRing] V2 writeChar set (big-data / temperature)")
@@ -1502,7 +1630,8 @@ extension QRingPlugin: CBPeripheralDelegate {
                 "deviceId": id,
                 "mac": id,
                 "name": peripheral.name ?? "QRing",
-                "model": inferModel(from: peripheral.name ?? "")
+                "model": inferModel(from: peripheral.name ?? ""),
+                "vendor": self.deviceVendor.rawValue,
             ])
             connectCall = nil
             notifyListeners("connected", data: [
