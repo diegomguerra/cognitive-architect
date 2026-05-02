@@ -1,6 +1,7 @@
 import Foundation
 import Capacitor
 import CoreBluetooth
+import RingParsers
 
 /**
  * QRingPlugin — Capacitor native plugin for Colmi R02/R03/R06 smart rings
@@ -103,6 +104,10 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var deviceVendor: DeviceVendor = .unknown
+    /// Vendor-specific parser from the RingParsers SPM package. Currently used
+    /// for JStyle paths (realtime, stress stream). Colmi paths still use the
+    /// in-file parsers below until ColmiParser is implemented in the package.
+    private let jstyleParser = JStyleParser()
     private var writeChar: CBCharacteristic?
     private var notifyChar: CBCharacteristic?
     // V2 characteristics (temperature). Optional — not all rings have them.
@@ -1122,53 +1127,21 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        // JStyle streaming: `37 88 00 [counter] 01 [stress] 00 00 00 00 88 01 00 00 00 [cks]`
-        //
-        // Verified across 51 packets (Diego 2026-05-01) and 18 packets
-        // (Diego 2026-05-02): bytes [10]=0x88 and [11]=0x01 are CONSTANT
-        // product-header markers, NOT heart rate. Previous code emitted
-        // HR=136 spammed for every stress packet — that was a parser bug.
-        // **HR is not present in this packet family.** Stress is at b[5].
-        if b[1] == 0x88 && deviceVendor == .jstyle {
-            let stress = Int(b[5])
-            let counter = Int(b[3])
-            if (1...200).contains(stress) {
-                stressSamples.append([
-                    "type": "stress",
-                    "ts": nowMsUnique(),
-                    "value": stress,
-                    "source": "qring_ble",
-                    "payload_json": ["mode": "jstyle_stress_stream", "counter": counter],
-                ])
-            }
-            if stressSamples.count >= 10 {
-                notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
-                stressSamples.removeAll()
-            }
-            return
-        }
-
-        // JStyle initial stress: 37 99 00 00 01 [value] 00 EA ...
-        if b[1] == 0x99 && deviceVendor == .jstyle {
-            let stress = Int(b[5])
-            if (1...200).contains(stress) {
-                stressSamples.append([
-                    "type": "stress",
-                    "ts": nowMsUnique(),
-                    "value": stress,
-                    "source": "qring_ble",
-                    "payload_json": ["mode": "jstyle_initial"],
-                ])
-            }
-            return
-        }
-
-        // JStyle end marker: 37 EA FF 01 ...
-        if b[1] == 0xEA && deviceVendor == .jstyle {
-            NSLog("[QRing] JStyle stress end/no-history marker")
-            if !stressSamples.isEmpty {
+        // JStyle paths (b[1] = 0x88 stream, 0x99 initial, 0xEA end, 0xFF no-data)
+        // route through the package parser. Verified by 4 production fixtures
+        // (Diego stress stream 2026-05-02, Diego handshake 2026-05-02, etc.) —
+        // the package emits ZERO phantom HR (the bug that produced HR=136 ×75
+        // for Diego on 2026-05-01 from the constant b[10]=0x88 byte).
+        if deviceVendor == .jstyle {
+            let result = jstyleParser.parse(bytes: b, channel: .v1, nowMs: Int64(nowMsUnique()))
+            for sample in result.samples { absorbPackageSample(sample) }
+            // End marker behavior: flush any accumulated stress samples
+            if b[1] == 0xEA, !stressSamples.isEmpty {
                 notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
                 notifyListeners("syncEnd", data: ["type": "stress"])
+                stressSamples.removeAll()
+            } else if stressSamples.count >= 10 {
+                notifyListeners("syncData", data: ["type": "stress", "samples": stressSamples])
                 stressSamples.removeAll()
             }
             return
@@ -1214,7 +1187,48 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Translate a RingParsers.Sample into the [String:Any] dict and append
+    /// to the appropriate in-flight realtime arrays the existing emit code uses.
+    /// Returns true if the sample was handled (used by package routing paths).
+    private func absorbPackageSample(_ s: RingParsers.Sample) {
+        let dict: [String: Any] = [
+            "type": s.type.rawValue,
+            "ts": s.timestampMs,
+            "value": s.value,
+            "source": "qring_ble",
+            "payload_json": ["mode": s.mode.rawValue].merging(s.metadata, uniquingKeysWith: { a, _ in a }),
+        ]
+        switch s.type {
+        case .hr:
+            realtimeHrSamples.append(dict)
+            notifyListeners("realtime", data: ["type": "hr", "value": Int(s.value)])
+        case .rr_interval:
+            let rrMs = Int(s.value)
+            realtimeRRIntervals.append(rrMs)
+            rrIntervalSamples.append(dict)
+        case .stress:
+            stressSamples.append(dict)
+        case .hrv:
+            realtimeHrvSamples.append(dict)
+        case .spo2:
+            realtimeSpo2Samples.append(dict)
+        case .temp:
+            tempSamples.append(dict)
+        case .sleep, .steps:
+            break // not emitted via realtime path
+        }
+    }
+
     private func parseRealtime(_ b: [UInt8]) {
+        // JStyle: route through the package parser (verified by 13 fixture tests
+        // including lidia_realtime_2026-05-01.json — same byte layout, same
+        // RR-derived HR fallback, but logic lives in one place now).
+        if deviceVendor == .jstyle {
+            let result = jstyleParser.parse(bytes: b, channel: .v1, nowMs: Int64(nowMsUnique()))
+            for sample in result.samples { absorbPackageSample(sample) }
+            return
+        }
+
         // R09 packet layout (verified from 553 debug_raw packets):
         //   [0]=0x69 (cmd), [1]=type, [2]=error_code (always 0 on R09)
         //   [3]=value (HR BPM; appears ~28s after start)
