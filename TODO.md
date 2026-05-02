@@ -1,6 +1,18 @@
 # VYR Labs — TODO consolidado
 
-> Última atualização: 2026-05-02 (Mac mini sessão final antes de migrar para Windows laptop)
+> Última atualização: 2026-05-02 (Mac mini sessão final — A+B+C+E concluídos antes de migrar para Windows laptop)
+
+## ✅ Completado nesta sessão (commits 146ba44 + 8b48f1e + anteriores)
+
+- **A** Fix `rhr` fallback threshold (≥50 amostras pra emitir rhr) — `vyr-compute-state` v9 (Apple) / v6 (Android). Daniele saiu de "Crítico 6" falso para "39 com confidence medium" honesto.
+- **B** 3 fixtures Colmi reais da Daniele R09 capturadas: `daniele_full_session_2026-04-27.json` (realtime HR + steps history multi-packet + 4 drain sentinels), `daniele_temp_v2_2026-04-27.json` (body temps), `daniele_warmup_2026-05-02.json` (zero-payload regression).
+- **C** `ColmiParser.swift` (era stub) implementado completo: 9 CMDs (0x03/0x15/0x2C/0x37/0x39/0x43/0x44/0x69/0xBC) + drain sentinel handling. **27/27 testes verdes** (13 JStyle + 14 Colmi) em <100ms.
+- **E** Ring-only honest score: `assessRingOnlyConfidence()` adicionado. Provider único qring_ble + HR<20 → confidence:low + display_label "Calibrando — coletando mais dados". Anomalias suprimidas em low confidence. Lídia=high (sleep window), Daniele=medium (partial), Diego=high (provider mix).
+
+Resultado: VYR State recomputado para os 3 testers — todos com scores honestos:
+- Lídia: 58 Moderado, confidence high
+- Diego: 49 Baixo, confidence high
+- Daniele: 39 Crítico, confidence medium (não mais falso-positivo)
 
 ## Estado atual em produção (build TestFlight 8.1(341))
 
@@ -33,55 +45,16 @@
 
 ### 🔥 EM EXECUÇÃO AGORA (sessão atual)
 
-#### A — Fix `rhr` fallback threshold (15 min)
-**Onde:** `vyr-compute-state` edge function, função `mergeQringBleIntoDaily` (em ambos Supabase projects)
-**O quê:** mudar a regra de emissão de `rhr`:
-- Atual: `>=20` → P10, `>=5` → min (PROBLEMA: `min` em sessão curta dá rhr falso alto)
-- Novo: `>=50` → P10 (sleep window típico tem centenas), senão NÃO emite rhr (engine cai em baseline em vez de punir)
-
-**Impacto direto:** Daniele sai de "Crítico 6" para algo realista após recompute.
-**Status:** in_progress
-
-#### B — Capturar 4-5 fixtures Colmi reais (40 min)
-**Onde:** `ios/Packages/RingParsers/Tests/RingParsersTests/Fixtures/Colmi/`
-**Source:** `biomarker_samples` da Daniele em 27/04 (229 packets) + 02/05 (62 packets) + Diego/Lídia se relevantes
-**Padrão:** copiar shape dos fixtures JStyle existentes — JSON com `expected` constraints + `packets` array com `ts_offset_ms` + `channel` + `raw_hex`
-**Fixtures a criar:**
-1. `daniele_realtime_2026-04-27.json` — CMD 0x69 com RR LE16 funcional
-2. `daniele_steps_history_2026-04-27.json` — CMD 0x43 multi-packet (vimos `43 00 03 31 ...`)
-3. `daniele_handshake_2026-05-02.json` — connect + battery + setTime + history requests retornando FF sentinels
-4. `daniele_temp_v2_2026-04-26.json` — CMD 0xBC big-data temperature (5 amostras 26/04)
-
-#### C — Implementar `ColmiParser` no pacote SwiftPM (90 min)
-**Onde:** `ios/Packages/RingParsers/Sources/RingParsers/Colmi/ColmiParser.swift`
-**Hoje:** stub que retorna `unrecognized: ["colmi-parser-stub"]`
-**Próximo:** implementar mirror do `JStyleParser` cobrindo:
-- CMD 0x03 Battery
-- CMD 0x15 HR History (Colmi multi-packet, 5-min interval, 288 slots/day)
-- CMD 0x2C SpO2 History
-- CMD 0x37 Stress History (Colmi b[2] mode)
-- CMD 0x39 HRV History (firmware ≥ 3.00.10)
-- CMD 0x43 Steps History (cumulative LE16 layout, 96 slots/day)
-- CMD 0x44 Sleep History (4-byte windows: start_min_lo/start_min_hi/duration_min/stage)
-- CMD 0x69 Realtime (HR/RR — same layout as JStyle for R09 variant)
-- CMD 0xBC V2 Big Data (temperature, half-hour slots, formula `(byte/10)+20`)
-
-**Source de verdade:** `project_qring_protocol.md` na memória (Puxtril + Gadgetbridge + tahnok + RingCLI). NÃO adivinhação — literatura pública.
-**Validação:** rodar fixtures do passo B contra o ColmiParser, todas verdes em `swift test`.
-
-#### E — Ring-only honest score (60 min)
-**Onde:** `vyr-compute-state` edge function — adicionar lógica de confidence
-**O quê:**
-- Quando `merged_providers === ["qring_ble"]` (provider único) E ring_metrics tem < N amostras críticas (HR < 20, HRV < 5):
-  - Score continua sendo computado MAS retorna `confidence: "low"` + `confidence_reason: "ring_only_short_window"`
-  - UI lê isso e mostra "Calibrando — coletando mais dados" em vez de "Crítico"
-- Frontend (`useVYRStore.ts` ou Home component) usa `confidence_level` para decidir como apresentar
-
-**Impacto estrutural:** Daniele NUNCA mais aparece como "Crítico 6" mesmo se rhr fallback voltar — UI assume incerteza ao invés de confiança falsa.
+A, B, C, E já completos — ver topo do arquivo. **Frontend (UI) ainda não consome `data_confidence.display_label`** — esse é o próximo gancho rápido (continua na sessão Windows).
 
 ---
 
 ### 📋 PRÓXIMAS SESSÕES (independentes, pode pegar em qualquer ordem)
+
+#### E.2 — Frontend consumir `data_confidence.display_label` (30 min)
+**Onde:** `src/hooks/useVYRStore.ts` ou Home component
+**O quê:** quando `computed_states.raw_input.data_confidence.confidence_level === 'low'`, exibir `display_label` em vez do level normal ("Crítico"/"Baixo"). Adicionar badge "Calibrando" ao lado do score.
+**Já está no banco:** edge function v10 (Apple) escreve `raw_input.data_confidence` em todos os computes. UI só precisa ler.
 
 #### D — Salvar `firmwareRev` por device em coluna dedicada
 **Onde:** schema `public.devices` (Supabase) + plugin já lê em `firmwareRev` mas não envia
