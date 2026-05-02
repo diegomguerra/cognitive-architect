@@ -1,0 +1,55 @@
+{
+  "fixture_name": "daniele_full_session_2026-04-27",
+  "vendor": "colmi",
+  "user_id": "19a6519a-ba89-43c0-a373-05657ffe8a7e",
+  "user_email": "dfaconi@icloud.com",
+  "device_model": "R09",
+  "firmware": "3.10.21",
+  "session_start_iso": "2026-04-27T23:35:50.206Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App",
+  "notes": "Full Colmi R09 sync session. Demonstrates: realtime HR (CMD 0x69 type=01 with RR LE16 in bytes[6-7] = 0x046A = 1130ms = ~53 BPM), HR history sentinel (15 FF — no data, ring drained by official QRing app), SpO2 history sentinel (2C 00), Stress history sentinel (37 FF), HRV history sentinel (39 FF), Steps history multi-packet (43 F0 metadata header + 10 data packets 43 00 03 31 ...). Verifies ColmiParser handles drain sentinels gracefully (zero samples emitted from FF responses) and parses cumulative steps correctly.",
+  "expected": {
+    "hr": {
+      "min_count": 5,
+      "value_range_bpm": [40, 70],
+      "all_mode": "realtime"
+    },
+    "rr_interval": {
+      "min_count": 5,
+      "value_range_ms": [800, 1300],
+      "all_mode": "realtime"
+    },
+    "steps": {
+      "min_count": 5,
+      "value_range": [0, 50000],
+      "all_mode": "history",
+      "comment": "Cumulative steps total per packet (LE16 at b[3-4])"
+    },
+    "spo2": { "max_count": 0, "comment": "2C 00 00... is no-data sentinel" },
+    "hrv": { "max_count": 0, "comment": "39 FF 00... is drain sentinel" },
+    "stress": { "max_count": 0, "comment": "37 FF 00... is drain sentinel" }
+  },
+  "packets": [
+    { "ts_offset_ms":     0, "channel": "v1", "raw_hex": "69 01 00 00 00 00 6A 04 00 00 00 00 00 00 00 D8" },
+    { "ts_offset_ms":   496, "channel": "v1", "raw_hex": "69 01 00 00 00 00 6A 04 00 00 00 00 00 00 00 D8" },
+    { "ts_offset_ms":   995, "channel": "v1", "raw_hex": "69 01 00 00 00 00 6A 04 00 00 00 00 00 00 00 D8" },
+    { "ts_offset_ms":  1490, "channel": "v1", "raw_hex": "69 01 00 00 00 00 6A 04 00 00 00 00 00 00 00 D8" },
+    { "ts_offset_ms":  1988, "channel": "v1", "raw_hex": "69 01 00 00 00 00 6A 04 00 00 00 00 00 00 00 D8" },
+    { "ts_offset_ms":  2307, "channel": "v1", "raw_hex": "16 02 01 00 00 00 00 00 00 00 00 00 00 00 00 19" },
+    { "ts_offset_ms":  2577, "channel": "v1", "raw_hex": "15 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 14" },
+    { "ts_offset_ms":  2805, "channel": "v1", "raw_hex": "43 F0 0A 01 00 00 00 00 00 00 00 00 00 00 00 3E" },
+    { "ts_offset_ms":  2807, "channel": "v1", "raw_hex": "43 00 03 31 0C 00 0A 81 00 1B 00 16 00 00 00 3F" },
+    { "ts_offset_ms":  2809, "channel": "v1", "raw_hex": "43 00 03 31 18 01 0A 8A 04 3E 01 C6 00 00 00 2D" },
+    { "ts_offset_ms":  2857, "channel": "v1", "raw_hex": "43 00 03 31 1C 02 0A 77 1D 09 07 10 05 00 00 58" },
+    { "ts_offset_ms":  2859, "channel": "v1", "raw_hex": "43 00 03 31 20 03 0A 34 0F 0B 04 9B 02 00 00 93" },
+    { "ts_offset_ms":  2862, "channel": "v1", "raw_hex": "43 00 03 31 24 04 0A 5A 0F F2 03 A2 02 00 00 AB" },
+    { "ts_offset_ms":  2906, "channel": "v1", "raw_hex": "43 00 03 31 28 05 0A 74 0E AD 03 7B 02 00 00 5D" },
+    { "ts_offset_ms":  2909, "channel": "v1", "raw_hex": "43 00 03 31 2C 06 0A 20 09 5B 02 90 01 00 00 CA" },
+    { "ts_offset_ms":  2911, "channel": "v1", "raw_hex": "43 00 03 31 30 07 0A 5A 10 53 04 CB 02 00 00 46" },
+    { "ts_offset_ms":  2957, "channel": "v1", "raw_hex": "43 00 03 31 34 08 0A B8 15 AD 05 B9 03 00 00 F8" },
+    { "ts_offset_ms":  2960, "channel": "v1", "raw_hex": "43 00 03 31 38 09 0A 0F 11 94 04 EB 02 00 00 67" },
+    { "ts_offset_ms":  3278, "channel": "v1", "raw_hex": "2C 00 00 00 00 00 00 00 00 00 00 00 00 00 00 2C" },
+    { "ts_offset_ms":  3594, "channel": "v1", "raw_hex": "37 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 36" },
+    { "ts_offset_ms":  3822, "channel": "v1", "raw_hex": "39 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 38" }
+  ]
+}

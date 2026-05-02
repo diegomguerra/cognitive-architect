@@ -1,0 +1,23 @@
+{
+  "fixture_name": "daniele_temp_v2_2026-04-27",
+  "vendor": "colmi",
+  "user_id": "19a6519a-ba89-43c0-a373-05657ffe8a7e",
+  "user_email": "dfaconi@icloud.com",
+  "device_model": "R09",
+  "firmware": "3.10.21",
+  "session_start_iso": "2026-04-27T09:22:34.356Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App",
+  "notes": "Colmi R09 V2 big-data temperature. Same V2 channel format as JStyle (BC 25 + length LE16 + day blocks). Layout: BC 25 <len_lo> <len_hi> <day_marker> <day_marker> | day_block: [days_ago][0x1E sep][48 half-hour bytes]. temp_c = (byte/10)+20. R09 sends partial-day blocks with mostly zeros plus actual readings (A6=36.6°C, A7=36.7°C, A5=36.5°C, A8=36.8°C). Body-temp range physiological 33.5-38°C.",
+  "expected": {
+    "temp": {
+      "min_count": 8,
+      "value_range_celsius": [35.5, 37.0],
+      "all_mode": "history"
+    },
+    "hr": { "max_count": 0 },
+    "stress": { "max_count": 0 }
+  },
+  "packets": [
+    { "ts_offset_ms": 0, "channel": "v2", "raw_hex": "BC 25 32 00 1C 30 00 1E 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 A6 00 A6 00 A5 00 A5 A7 00 A7 A7 A7 A7 A7 A7 A7 A7 A8 A8 A7 A8" }
+  ]
+}

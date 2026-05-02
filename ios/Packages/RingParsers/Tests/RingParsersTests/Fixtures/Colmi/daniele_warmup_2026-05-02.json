@@ -1,0 +1,22 @@
+{
+  "fixture_name": "daniele_warmup_2026-05-02",
+  "vendor": "colmi",
+  "user_id": "19a6519a-ba89-43c0-a373-05657ffe8a7e",
+  "user_email": "dfaconi@icloud.com",
+  "device_model": "R09",
+  "firmware": "3.10.21",
+  "session_start_iso": "2026-05-02T13:47:25.646Z",
+  "captured_from": "biomarker_samples/qring_ble/debug_raw on Apple Vyr App",
+  "notes": "Colmi R09 realtime warmup state. Ring sends CMD 0x69 type=01 packets with bytes[6-7]=0x0000 (no RR yet — sensor warming up after wear detection). Verifies ColmiParser does NOT emit phantom samples from zero-payload realtime packets (this was a category of bug in old parser).",
+  "expected": {
+    "hr": { "max_count": 0, "comment": "Zero-payload realtime should produce ZERO HR samples" },
+    "rr_interval": { "max_count": 0, "comment": "RR=0 is invalid, must not be emitted" }
+  },
+  "packets": [
+    { "ts_offset_ms":     0, "channel": "v1", "raw_hex": "69 01 00 00 00 00 00 00 00 00 00 00 00 00 00 6A" },
+    { "ts_offset_ms":   497, "channel": "v1", "raw_hex": "69 01 00 00 00 00 00 00 00 00 00 00 00 00 00 6A" },
+    { "ts_offset_ms":   997, "channel": "v1", "raw_hex": "69 01 00 00 00 00 00 00 00 00 00 00 00 00 00 6A" },
+    { "ts_offset_ms":  1492, "channel": "v1", "raw_hex": "69 01 00 00 00 00 00 00 00 00 00 00 00 00 00 6A" },
+    { "ts_offset_ms":  1990, "channel": "v1", "raw_hex": "69 01 00 00 00 00 00 00 00 00 00 00 00 00 00 6A" }
+  ]
+}
