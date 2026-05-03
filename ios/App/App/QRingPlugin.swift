@@ -136,6 +136,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var firmwareRev: String?
 
     private var isScanning = false
+    /// Retain discovered peripherals so CoreBluetooth does not GC them before connect
+    private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var connectCall: CAPPluginCall?
     private var pendingSyncCall: CAPPluginCall?
 
@@ -290,8 +292,13 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("INVALID_DEVICE_ID (not a CBPeripheral UUID string)")
             return
         }
-        let peripherals = central.retrievePeripherals(withIdentifiers: [uuid])
-        guard let p = peripherals.first else {
+        // Try retained peripheral first, then system cache
+        let p: CBPeripheral
+        if let retained = discoveredPeripherals[uuid] {
+            p = retained
+        } else if let retrieved = central.retrievePeripherals(withIdentifiers: [uuid]).first {
+            p = retrieved
+        } else {
             call.reject("DEVICE_NOT_FOUND (scan again and try)")
             return
         }
@@ -332,6 +339,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             central.cancelPeripheralConnection(p)
         }
         peripheral = nil
+        discoveredPeripherals.removeAll()
         deviceVendor = .unknown
         writeChar = nil
         notifyChar = nil
@@ -378,21 +386,26 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         jsPendingHistoryCmd = 0
         jsHistoryQueue.removeAll()
 
-        // --- Sync sequence: HISTORY FIRST, then REALTIME ---
-        //
-        // Build 334 root cause: realtime (CMD 0x69) started at t+2s BEFORE history
-        // at t+3s. Ring's continuous realtime packets blocked opQueue, preventing
-        // history commands from being sent. Result: 0 history packets received.
-        //
-        // Fix: all history commands complete BEFORE realtime starts.
-        // Realtime HR is only needed for RR intervals (derive HRV/Stress).
-        //
-        // Phase 1: Setup (t+0s) — time, battery, auto-measurement enables
-        // Phase 2: V2 Temperature history (t+2s) — separate channel, non-blocking
-        // Phase 3: V1 History commands (t+3s) — HR, Steps, SpO2, Stress, HRV
-        // Phase 4: Realtime HR for RR intervals (t+11s) — after history completes
-        // Phase 5: Resolve (t+32s) — stop realtime, derive, flush
+        // Late vendor detection: on reconnect from saved UUID, peripheral.name
+        // may be nil at connect time. Re-check now that connection is established.
+        if deviceVendor == .unknown || deviceVendor == .colmi {
+            if let name = peripheral?.name, !name.isEmpty {
+                let detected = inferVendor(from: name)
+                if detected != .unknown && detected != deviceVendor {
+                    deviceVendor = detected
+                    NSLog("[QRing] Late vendor re-detection: '%@' -> %@", name, detected.rawValue)
+                }
+            }
+        }
 
+        // JStyle X3/X5 — use JStyle-specific sync sequence
+        if deviceVendor == .jstyle {
+            syncJStyle()
+            return
+        }
+
+        // --- Colmi R09 sync: HISTORY FIRST, then REALTIME ---
+        //
         // Phase 1: Setup + auto-measurement enables
         sendSetTime()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -691,19 +704,42 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         case Self.JS_CMD_SET_AUTO:
             NSLog("[QRing] JStyle auto-monitoring ack")
 
-        case Self.JS_CMD_GET_HR:  // 0x54 — continuous HR history
-            parseJStyleHR(b)
-            if endFlag == 1 || b[1] == 0xFF {
+        case Self.JS_CMD_GET_HR:  // 0x54 — continuous HR history (multi-record, 25 bytes each)
+            let hrRecordSize = 25
+            var hrIdx = 0
+            var hrEnded = false
+            while hrIdx + hrRecordSize <= b.count {
+                let rec = Array(b[hrIdx..<hrIdx+hrRecordSize])
+                if rec[1] == 0xFF { hrEnded = true; break }
+                parseJStyleHR(rec)
+                hrIdx += hrRecordSize
+            }
+            // Check for short end marker (e.g. "54 FF" = 2 bytes)
+            if !hrEnded && hrIdx < b.count && b[hrIdx] == Self.JS_CMD_GET_HR && hrIdx + 1 < b.count && b[hrIdx+1] == 0xFF {
+                hrEnded = true
+            }
+            if hrEnded || endFlag == 1 {
                 flushJStyleType("hr", &hrSamples)
                 jsRequestNextHistory()
             } else if jsPendingHistoryCmd == Self.JS_CMD_GET_HR {
-                // More data available — request continuation
                 jsSendHistoryRequest(cmd: Self.JS_CMD_GET_HR, mode: 0x02)
             }
 
-        case Self.JS_CMD_GET_HRV:  // 0x56 — HRV + stress
-            parseJStyleHRV(b)
-            if endFlag == 1 || b[1] == 0xFF {
+        case Self.JS_CMD_GET_HRV:  // 0x56 — HRV + stress (multi-record, 15 bytes each)
+            let hrvRecordSize = 15
+            var hrvIdx = 0
+            var hrvEnded = false
+            while hrvIdx + hrvRecordSize <= b.count {
+                let rec = Array(b[hrvIdx..<hrvIdx+hrvRecordSize])
+                if rec[1] == 0xFF { hrvEnded = true; break }
+                parseJStyleHRV(rec)
+                hrvIdx += hrvRecordSize
+            }
+            // Check for short end marker (e.g. "56 FF" = 2 bytes)
+            if !hrvEnded && hrvIdx < b.count && b[hrvIdx] == Self.JS_CMD_GET_HRV && hrvIdx + 1 < b.count && b[hrvIdx+1] == 0xFF {
+                hrvEnded = true
+            }
+            if hrvEnded || endFlag == 1 {
                 flushJStyleType("hrv", &hrvSamples)
                 flushJStyleType("stress", &stressSamples)
                 jsRequestNextHistory()
@@ -720,18 +756,40 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 jsSendHistoryRequest(cmd: Self.JS_CMD_GET_SPO2, mode: 0x02)
             }
 
-        case Self.JS_CMD_GET_TEMP:  // 0x62
-            parseJStyleTemp(b)
-            if endFlag == 1 || b[1] == 0xFF {
+        case Self.JS_CMD_GET_TEMP:  // 0x62 (multi-record, 11 bytes each)
+            let tempRecordSize = 11
+            var tempIdx = 0
+            var tempEnded = false
+            while tempIdx + tempRecordSize <= b.count {
+                let rec = Array(b[tempIdx..<tempIdx+tempRecordSize])
+                if rec[1] == 0xFF { tempEnded = true; break }
+                parseJStyleTemp(rec)
+                tempIdx += tempRecordSize
+            }
+            if !tempEnded && tempIdx < b.count && b[tempIdx] == Self.JS_CMD_GET_TEMP && tempIdx + 1 < b.count && b[tempIdx+1] == 0xFF {
+                tempEnded = true
+            }
+            if tempEnded || endFlag == 1 {
                 flushJStyleType("temp", &tempSamples)
                 jsRequestNextHistory()
             } else if jsPendingHistoryCmd == Self.JS_CMD_GET_TEMP {
                 jsSendHistoryRequest(cmd: Self.JS_CMD_GET_TEMP, mode: 0x02)
             }
 
-        case Self.JS_CMD_GET_TOTAL:  // 0x51 — daily steps
-            parseJStyleSteps(b)
-            if endFlag == 1 || b[1] == 0xFF {
+        case Self.JS_CMD_GET_TOTAL:  // 0x51 — daily steps (multi-record, 27 bytes each)
+            let stepsRecordSize = 27
+            var stepsIdx = 0
+            var stepsEnded = false
+            while stepsIdx + stepsRecordSize <= b.count {
+                let rec = Array(b[stepsIdx..<stepsIdx+stepsRecordSize])
+                if rec[1] == 0xFF { stepsEnded = true; break }
+                parseJStyleSteps(rec)
+                stepsIdx += stepsRecordSize
+            }
+            if !stepsEnded && stepsIdx < b.count && b[stepsIdx] == Self.JS_CMD_GET_TOTAL && stepsIdx + 1 < b.count && b[stepsIdx+1] == 0xFF {
+                stepsEnded = true
+            }
+            if stepsEnded || endFlag == 1 {
                 flushJStyleType("steps", &stepsSamples)
                 jsRequestNextHistory()
             } else if jsPendingHistoryCmd == Self.JS_CMD_GET_TOTAL {
@@ -774,57 +832,68 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - JStyle History Parsers
 
-    /// Parse JStyle continuous HR (0x54). Each record: date(6 bytes) + 15 HR values.
+    /// Parse JStyle continuous HR (0x54). Record format:
+    /// [0]=CMD(0x54), [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=count, [9..23]=HR values
+    /// Total record size: 25 bytes (up to 15 HR values per record).
     private func parseJStyleHR(_ b: [UInt8]) {
-        guard b.count >= 8 else { return }
+        guard b.count >= 10 else { return }
         if b[1] == 0xFF { return }  // empty/end marker
 
-        // Date: b[1]=year-2000, b[2]=month, b[3]=day, b[4]=hour, b[5]=min, b[6]=sec
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[1])
-        comps.month = Int(b[2])
-        comps.day = Int(b[3])
-        comps.hour = Int(b[4])
-        comps.minute = Int(b[5])
-        comps.second = Int(b[6])
+        comps.year = 2000 + Int(b[3])
+        comps.month = Int(b[4])
+        comps.day = Int(b[5])
+        comps.hour = Int(b[6])
+        comps.minute = Int(b[7])
+        comps.second = 0
         guard let baseDate = cal.date(from: comps) else { return }
+        // Timestamp validation: discard future dates
+        if baseDate.timeIntervalSinceNow > 86400 { return }
         let baseSec = baseDate.timeIntervalSince1970
 
-        // HR values start at b[7], each 1 byte = 1-min reading
-        for i in 7..<min(b.count - 1, 22) {  // up to 15 values, skip CRC byte
-            let hr = Int(b[i])
+        let count = Int(b[8])  // number of HR readings in this record
+        let maxVals = min(count, 15)  // cap at 15
+
+        // HR values start at b[9], each 1 byte = 1-min reading
+        for i in 0..<maxVals {
+            let idx = 9 + i
+            if idx >= b.count { break }
+            let hr = Int(b[idx])
             if hr == 0 || !(30...220).contains(hr) { continue }
-            let tsSec = baseSec + Double(i - 7) * 60  // 1-min intervals
+            let tsSec = baseSec + Double(i) * 60  // 1-min intervals
             hrSamples.append([
                 "type": "hr",
                 "ts": tsSec * 1000,
                 "value": hr,
                 "source": "qring_ble",
-                "payload_json": ["mode": "jstyle_history"],
+                "payload_json": ["mode": "jstyle_history", "packet": Int(b[1])],
             ])
         }
     }
 
     /// Parse JStyle HRV (0x56). Contains HRV, stress, HR, BP.
     private func parseJStyleHRV(_ b: [UInt8]) {
-        guard b.count >= 10 else { return }
+        guard b.count >= 15 else { return }
         if b[1] == 0xFF { return }
 
+        // Record: [0]=CMD, [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=duration, [9]=HRV, [10]=stress, [11]=SDNN_L, [12]=SDNN_H, [13]=RMSSD_L, [14]=RMSSD_H
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[1])
-        comps.month = Int(b[2])
-        comps.day = Int(b[3])
-        comps.hour = Int(b[4])
-        comps.minute = Int(b[5])
-        comps.second = Int(b[6])
+        comps.year = 2000 + Int(b[3])
+        comps.month = Int(b[4])
+        comps.day = Int(b[5])
+        comps.hour = Int(b[6])
+        comps.minute = Int(b[7])
+        comps.second = 0
         guard let date = cal.date(from: comps) else { return }
+        // Timestamp validation: discard future dates
+        if date.timeIntervalSinceNow > 86400 { return }
         let tsMs = date.timeIntervalSince1970 * 1000
 
-        let hrv = Int(b[7])
-        let stress = Int(b[8])
-        let hr = Int(b[9])
+        let hrv = Int(b[9])
+        let stress = Int(b[10])
+        let hr = Int(b[11])
 
         if (5...250).contains(hrv) {
             hrvSamples.append([
@@ -884,21 +953,26 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Parse JStyle temperature history (0x62).
     private func parseJStyleTemp(_ b: [UInt8]) {
-        guard b.count >= 9 else { return }
+        guard b.count >= 11 else { return }
         if b[1] == 0xFF { return }
 
+        // Record: [0]=CMD, [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=ss, [9]=temp_raw, [10]=temp_flag
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[1])
-        comps.month = Int(b[2])
-        comps.day = Int(b[3])
-        comps.hour = Int(b[4])
-        comps.minute = Int(b[5])
-        comps.second = Int(b[6])
+        comps.year = 2000 + Int(b[3])
+        comps.month = Int(b[4])
+        comps.day = Int(b[5])
+        comps.hour = Int(b[6])
+        comps.minute = Int(b[7])
+        comps.second = Int(b[8])
         guard let date = cal.date(from: comps) else { return }
+        // Timestamp validation: discard future dates
+        if date.timeIntervalSinceNow > 86400 { return }
 
-        // Temperature LE16 in 0.1C
-        let rawTemp = Int(b[7]) | (Int(b[8]) << 8)
+        // Temperature: byte[9] is raw value, byte[10] is decimal flag
+        // Format: temp = b[9] + b[10]*0.01 if flag indicates decimals, or b[9]*0.5 + offset
+        // Based on raw data (0x47=71, 0x48=72 with flag 0x01): temp = value / 2.0
+        let rawTemp = Int(b[9]) | (Int(b[10]) << 8)
         let celsius = Double(rawTemp) / 10.0
         if (25.0...42.0).contains(celsius) {
             tempSamples.append([
@@ -913,18 +987,26 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// Parse JStyle daily steps (0x51).
     private func parseJStyleSteps(_ b: [UInt8]) {
-        guard b.count >= 10 else { return }
+        guard b.count >= 27 else { return }
         if b[1] == 0xFF { return }
 
+        // Record: [0]=CMD(0x51), [1]=idx, [2]=YY(BCD), [3]=MM(BCD), [4]=DD(BCD), [5..8]=steps_LE32
+        // Steps uses BCD date encoding (0x26 = year 26 = 2026)
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[1])
-        comps.month = Int(b[2])
-        comps.day = Int(b[3])
+        let bcdYear = Int(b[2] >> 4) * 10 + Int(b[2] & 0x0F)
+        let bcdMonth = Int(b[3] >> 4) * 10 + Int(b[3] & 0x0F)
+        let bcdDay = Int(b[4] >> 4) * 10 + Int(b[4] & 0x0F)
+        comps.year = 2000 + bcdYear
+        comps.month = bcdMonth
+        comps.day = bcdDay
+        comps.hour = 12  // noon — represents daily total
         guard let date = cal.date(from: comps) else { return }
+        // Timestamp validation: discard future dates
+        if date.timeIntervalSinceNow > 86400 * 2 { return }
 
-        // Steps LE32 in b[4..7]
-        let steps = Int(b[4]) | (Int(b[5]) << 8) | (Int(b[6]) << 16) | (Int(b[7]) << 24)
+        // Steps LE32 in b[5..8]
+        let steps = Int(b[5]) | (Int(b[6]) << 8) | (Int(b[7]) << 16) | (Int(b[8]) << 24)
         if steps > 0 && steps < 100000 {
             stepsSamples.append([
                 "type": "steps",
@@ -949,6 +1031,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         comps.hour = Int(b[4])
         comps.minute = Int(b[5])
         guard let date = cal.date(from: comps) else { return }
+        // Timestamp validation: discard future dates
+        if date.timeIntervalSinceNow > 86400 { return }
 
         // Sleep quality code: 1=deep, 2=light, 3=REM, other=awake
         let quality = Int(b[6])
@@ -2009,6 +2093,9 @@ extension QRingPlugin: CBCentralManagerDelegate {
         let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map { $0.uuidString } ?? []
         let manufacturerData = (advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data)?.map { String(format: "%02X", $0) }.joined(separator: " ") ?? ""
 
+        // Retain peripheral so it survives until connect() is called
+        discoveredPeripherals[peripheral.identifier] = peripheral
+
         NSLog("[QRing] didDiscover name=%@ rssi=%@ services=%@ manuf=%@",
               name, RSSI, services.joined(separator: ","), manufacturerData)
 
@@ -2132,8 +2219,15 @@ extension QRingPlugin: CBPeripheralDelegate {
                 peripheral.discoverCharacteristics([Self.writeUUID, Self.notifyUUID], for: service)
             } else if service.uuid == Self.jstyleServiceUUID {
                 // JStyle X3/X5 ring â FFF0 service with FFF6 write, FFF7 notify
+                // IMPORTANT: Do NOT override .colmi detected by name â some Colmi rings
+                // (R09) also expose a short FFF0 service but use the Colmi protocol.
                 if deviceVendor == .unknown { deviceVendor = .jstyle }
-                peripheral.discoverCharacteristics([Self.jstyleWriteUUID, Self.jstyleNotifyUUID], for: service)
+                if deviceVendor == .jstyle {
+                    NSLog("[QRing] FFF0 service found â vendor confirmed jstyle")
+                    peripheral.discoverCharacteristics([Self.jstyleWriteUUID, Self.jstyleNotifyUUID], for: service)
+                } else {
+                    NSLog("[QRing] FFF0 service found but vendor is %@ â skipping JStyle chars", deviceVendor.rawValue)
+                }
             } else if service.uuid == Self.serviceUUIDv2 {
                 // V2 "big data" service (temperature on R09)
                 peripheral.discoverCharacteristics([Self.writeUUIDv2, Self.notifyUUIDv2], for: service)
@@ -2205,6 +2299,24 @@ extension QRingPlugin: CBPeripheralDelegate {
         // If both chars are present (exact or fallback), we're good to go
         if writeChar != nil && notifyChar != nil && connectCall != nil {
             let id = peripheral.identifier.uuidString
+            // Re-detect vendor now that name is available post-connection
+            if let pName = peripheral.name, !pName.isEmpty {
+                let detected = inferVendor(from: pName)
+                if detected != .unknown && deviceVendor != detected {
+                    deviceVendor = detected
+                    NSLog("[QRing] Vendor corrected post-connect: '%@' -> %@", pName, detected.rawValue)
+                }
+            }
+
+            // Re-detect vendor now that name is available post-connection
+            if let pName = peripheral.name, !pName.isEmpty {
+                let detected = inferVendor(from: pName)
+                if detected != .unknown && deviceVendor != detected {
+                    deviceVendor = detected
+                    NSLog("[QRing] Vendor corrected post-connect: '%@' -> %@", pName, detected.rawValue)
+                }
+            }
+
             connectCall?.resolve([
                 "connected": true,
                 "deviceId": id,
