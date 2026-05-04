@@ -417,16 +417,25 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             self?.sendHRSettings(enable: true, intervalMinutes: 5)
         }
-        // Enable auto-measurements (persist on ring across disconnects)
+        // Enable auto-measurements (persist on ring across disconnects).
+        // Each CMD activates a different sensor channel + LED:
+        //   CMD 0x16 (HR Settings, sent above) → green LED, every 5 min
+        //   CMD 0x2C (SpO2 history WRITE) → red LED, every 30 min
+        //   CMD 0x37 (Stress WRITE) → PPG-derived autonomic balance, 30 min
+        //   CMD 0x39 (HRV WRITE) → blue/IR LED, 30 min (firmware >= 3.10)
+        // Symmetric to JStyle Phase 2 (jsSendAutoMonitoring dataType=1/2/3/4).
+        // Bug pre-build 359: Stress/HRV used intervalMinutes=0, which sets
+        // pkt[3]=0 — ring interprets as "no continuous capture" so the LED
+        // and sensor never activate. Fixed by using 30 min interval for both.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.sendAutoMeasurementEnable(cmd: Self.CMD_SPO2_HISTORY, intervalMinutes: 30)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.sendAutoMeasurementEnable(cmd: Self.CMD_STRESS_HIST, intervalMinutes: 0)
+            self?.sendAutoMeasurementEnable(cmd: Self.CMD_STRESS_HIST, intervalMinutes: 30)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             if self?.isHrvSupported() == true {
-                self?.sendAutoMeasurementEnable(cmd: Self.CMD_HRV_HISTORY, intervalMinutes: 0)
+                self?.sendAutoMeasurementEnable(cmd: Self.CMD_HRV_HISTORY, intervalMinutes: 30)
             }
         }
 
