@@ -140,6 +140,12 @@ platform :ios do
 
     cocoapods(podfile: "App/Podfile", try_repo_update_on_error: true)
 
+    # Force Manual Signing with explicit provisioning profile to avoid the
+    # "iOS Team Store Provisioning Profile" auto-fetch failure when the Mac
+    # has no Apple ID configured in Xcode. Uses VYR App Store Build346 (or
+    # whichever profile name is current) — must match a profile installed
+    # at ~/Library/MobileDevice/Provisioning Profiles/ that includes the
+    # current iPhone Distribution cert in the keychain.
     build_app(
       workspace: "App/App.xcworkspace",
       scheme: "App",
@@ -148,7 +154,13 @@ platform :ios do
       clean: true,
       output_directory: "build",
       output_name: "VYR.ipa",
-      xcargs: "-allowProvisioningUpdates"
+      xcargs: "-allowProvisioningUpdates",
+      export_options: {
+        method: "app-store",
+        signingStyle: "manual",
+        provisioningProfiles: { "com.vyrlabs.app" => "VYR App Store Build346" },
+        teamID: "WNB4G5T7Z6"
+      }
     )
 
     # Bypass fastlane's upload_to_testflight wrapper — it returns a spurious
