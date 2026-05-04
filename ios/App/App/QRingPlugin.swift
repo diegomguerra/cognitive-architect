@@ -2130,14 +2130,25 @@ extension QRingPlugin: CBCentralManagerDelegate {
 
     private func inferVendor(from name: String) -> DeviceVendor {
         let n = name.uppercased()
-        if n.contains("COLMI") || n.contains("QRING") || n.contains("R02")
-            || n.contains("R03") || n.contains("R06") || n.contains("R09") || n.contains("R10") {
-            return .colmi
-        }
-        if n.contains("JSTYLE") || n.contains("J-STYLE") || n.contains("X3")
-            || n.contains("X5") || n.contains("JCVITAL") || n.contains("V5") {
+        // JStyle FIRST — model-specific tokens (X3/X5/V5/JCVITAL/JCRING/J-STYLE)
+        // are unambiguous JStyle hardware. Some Chinese white-label rings advertise
+        // as "Colmi X5" or "ColmiRing X5" — the X5 token must win over COLMI brand.
+        // Verified bug: Diego's X5 was registered as vendor=colmi on 2026-05-01
+        // because old inferVendor matched COLMI substring first → sync took Colmi
+        // path → CMDs 0x15/0x16/0x43 unsupported by JStyle firmware → silent fail.
+        if n.contains("JSTYLE") || n.contains("J-STYLE") || n.contains("JCVITAL")
+            || n.contains("JCRING") || n.contains("X3") || n.contains("X5")
+            || n.contains("V5") || n.contains("V8") || n.contains("V10") {
+            NSLog("[QRing] inferVendor: '%@' -> jstyle (model token match)", name)
             return .jstyle
         }
+        // Colmi second — generic brand + R-series model tokens
+        if n.contains("COLMI") || n.contains("QRING") || n.contains("R02")
+            || n.contains("R03") || n.contains("R06") || n.contains("R09") || n.contains("R10") {
+            NSLog("[QRing] inferVendor: '%@' -> colmi (brand/R-series match)", name)
+            return .colmi
+        }
+        NSLog("[QRing] inferVendor: '%@' -> unknown (no token matched)", name)
         return .unknown
     }
 

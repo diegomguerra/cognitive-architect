@@ -92,11 +92,18 @@ export class QRingAdapter implements WearableAdapter {
       this.attachDiagnosticsListeners();
       const r = await this.plugin?.connect({ deviceId });
       if (r?.connected) {
+        // Use vendor/model returned by the native plugin's inferVendor — never
+        // hardcode. Diego's X5 was being saved as vendor=colmi on 2026-05-01
+        // because this line was `vendor: 'colmi'` regardless of inferVendor's
+        // result, which then poisoned the devices table + reconnect path.
+        const inferredVendor = (r.vendor === 'jstyle' || r.vendor === 'colmi')
+          ? r.vendor
+          : 'colmi'; // safe fallback for legacy R02/R09 if plugin omits vendor
         this.connectedDevice = {
           deviceId,
           name: r.name ?? 'QRing',
-          vendor: 'colmi',
-          model: r.model ?? 'R02',
+          vendor: inferredVendor,
+          model: r.model ?? 'unknown',
           mac: r.mac,
         };
         // fwVersion + battery arrive asynchronously via 'firmwareRev' / 'battery'
