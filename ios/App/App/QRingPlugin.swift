@@ -515,12 +515,25 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self?.jsSendGetVersion()
         }
 
-        // Phase 2: Configure auto-monitoring (t+1s)
+        // Phase 2: Configure auto-monitoring — ALL 4 sensor channels (each one
+        // also activates the corresponding LED on the ring's optical sensor):
+        //   dataType=1 → HR    (green LED, every 5 min)
+        //   dataType=2 → SpO2  (red LED, every 30 min)
+        //   dataType=3 → Temp  (skin temp probe, every 30 min)
+        //   dataType=4 → HRV   (blue/IR LED, every 30 min) — fires PPI for variability
+        // Persisting on the ring across disconnects, so even if the user closes
+        // the app the X5 keeps logging continuously.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.jsSendAutoMonitoring(dataType: 1, intervalMin: 5)  // HR every 5 min
+            self?.jsSendAutoMonitoring(dataType: 1, intervalMin: 5)   // HR (green LED)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in
-            self?.jsSendAutoMonitoring(dataType: 3, intervalMin: 30) // Temp every 30 min
+            self?.jsSendAutoMonitoring(dataType: 2, intervalMin: 30)  // SpO2 (red LED)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            self?.jsSendAutoMonitoring(dataType: 3, intervalMin: 30)  // Temp
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.9) { [weak self] in
+            self?.jsSendAutoMonitoring(dataType: 4, intervalMin: 30)  // HRV (blue LED)
         }
 
         // Phase 3: History retrieval (t+2s) — sequential via pagination queue
@@ -705,7 +718,10 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             NSLog("[QRing] JStyle auto-monitoring ack")
 
         case Self.JS_CMD_GET_HR:  // 0x54 — continuous HR history (multi-record, 25 bytes each)
-            let hrRecordSize = 25
+            // FIX 2026-05-04: record size is 24 bytes (header 9 + 15 HR values),
+            // not 25. Off-by-one was misaligning every record after the first
+            // → cascade of invalid headers → all samples discarded silently.
+            let hrRecordSize = 24
             var hrIdx = 0
             var hrEnded = false
             while hrIdx + hrRecordSize <= b.count {
@@ -835,17 +851,24 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Parse JStyle continuous HR (0x54). Record format:
     /// [0]=CMD(0x54), [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=count, [9..23]=HR values
     /// Total record size: 25 bytes (up to 15 HR values per record).
+    /// BCD decode: 0x26 → 26, 0x58 → 58 (each nibble is a decimal digit).
+    /// JStyle ring encodes year/month/day/hour/minute as BCD bytes.
+    /// Without this, parser interpreted 0x26 as 38 → year=2038 → invalid date → sample dropped.
+    private static func bcd(_ byte: UInt8) -> Int {
+        return Int((byte >> 4) & 0x0F) * 10 + Int(byte & 0x0F)
+    }
+
     private func parseJStyleHR(_ b: [UInt8]) {
         guard b.count >= 10 else { return }
         if b[1] == 0xFF { return }  // empty/end marker
 
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[3])
-        comps.month = Int(b[4])
-        comps.day = Int(b[5])
-        comps.hour = Int(b[6])
-        comps.minute = Int(b[7])
+        comps.year = 2000 + Self.bcd(b[3])
+        comps.month = Self.bcd(b[4])
+        comps.day = Self.bcd(b[5])
+        comps.hour = Self.bcd(b[6])
+        comps.minute = Self.bcd(b[7])
         comps.second = 0
         guard let baseDate = cal.date(from: comps) else { return }
         // Timestamp validation: discard future dates
@@ -880,11 +903,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         // Record: [0]=CMD, [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=duration, [9]=HRV, [10]=stress, [11]=SDNN_L, [12]=SDNN_H, [13]=RMSSD_L, [14]=RMSSD_H
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[3])
-        comps.month = Int(b[4])
-        comps.day = Int(b[5])
-        comps.hour = Int(b[6])
-        comps.minute = Int(b[7])
+        comps.year = 2000 + Self.bcd(b[3])
+        comps.month = Self.bcd(b[4])
+        comps.day = Self.bcd(b[5])
+        comps.hour = Self.bcd(b[6])
+        comps.minute = Self.bcd(b[7])
         comps.second = 0
         guard let date = cal.date(from: comps) else { return }
         // Timestamp validation: discard future dates
@@ -959,11 +982,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         // Record: [0]=CMD, [1]=idx, [2]=0x00, [3]=YY, [4]=MM, [5]=DD, [6]=HH, [7]=mm, [8]=ss, [9]=temp_raw, [10]=temp_flag
         let cal = Calendar(identifier: .gregorian)
         var comps = DateComponents()
-        comps.year = 2000 + Int(b[3])
-        comps.month = Int(b[4])
-        comps.day = Int(b[5])
-        comps.hour = Int(b[6])
-        comps.minute = Int(b[7])
+        comps.year = 2000 + Self.bcd(b[3])
+        comps.month = Self.bcd(b[4])
+        comps.day = Self.bcd(b[5])
+        comps.hour = Self.bcd(b[6])
+        comps.minute = Self.bcd(b[7])
         comps.second = Int(b[8])
         guard let date = cal.date(from: comps) else { return }
         // Timestamp validation: discard future dates
