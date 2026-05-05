@@ -314,8 +314,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             CBConnectPeripheralOptionNotifyOnConnectionKey: true,
             CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
         ])
-        // 10s connection timeout — cancel + reject if didConnect never fires
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+        // 20s connection timeout — BLE can be slow (adv interval + 2s settle + char discovery)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self = self, self.connectCall != nil else { return }
             self.central.cancelPeripheralConnection(p)
             self.connectCall?.reject("CONNECT_TIMEOUT")
@@ -2202,8 +2202,8 @@ extension QRingPlugin: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         NSLog("[QRing] connected, discovering services…")
-        // Gadgetbridge gotcha — let the ring settle 2s before discovering
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        // Brief settle before service discovery (was 2s, reduced to avoid timeout race)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             // Discover ALL services (nil filter) so we can see R09's actual
             // GATT tree, not just the Nordic UART we expected. Some Colmi
             // variants expose their control characteristics on a proprietary
