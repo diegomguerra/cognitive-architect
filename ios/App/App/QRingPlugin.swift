@@ -314,8 +314,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             CBConnectPeripheralOptionNotifyOnConnectionKey: true,
             CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
         ])
-        // 20s connection timeout — BLE can be slow (adv interval + 2s settle + char discovery)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+        // 10s connection timeout — cancel + reject if didConnect never fires
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
             guard let self = self, self.connectCall != nil else { return }
             self.central.cancelPeripheralConnection(p)
             self.connectCall?.reject("CONNECT_TIMEOUT")
@@ -576,14 +576,6 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self = self else { return }
             self.jsSendRealtimePPI(enable: false)
             self.jsSendMeasurement(type: 2, enable: false, durationSec: 0)
-            // Flush any remaining history samples that arrived after their FF marker
-            self.flushJStyleType("hr", &self.hrSamples)
-            self.flushJStyleType("hrv", &self.hrvSamples)
-            self.flushJStyleType("stress", &self.stressSamples)
-            self.flushJStyleType("spo2", &self.spo2Samples)
-            self.flushJStyleType("temp", &self.tempSamples)
-            self.flushJStyleType("steps", &self.stepsSamples)
-            self.flushJStyleType("sleep", &self.sleepSamples)
             self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
             self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
             self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
@@ -888,9 +880,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         comps.minute = Self.bcd(b[7])
         comps.second = 0
         guard let baseDate = cal.date(from: comps) else { return }
-        // Timestamp validation: discard dates before 2024 (garbage BCD from old ring memory) or future
-        let minValidDate = DateComponents(calendar: cal, year: 2024, month: 1, day: 1).date!
-        if baseDate < minValidDate { return }
+        // Timestamp validation: discard future dates
         if baseDate.timeIntervalSinceNow > 86400 { return }
         let baseSec = baseDate.timeIntervalSince1970
 
@@ -929,9 +919,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         comps.minute = Self.bcd(b[7])
         comps.second = 0
         guard let date = cal.date(from: comps) else { return }
-        // Timestamp validation: discard dates before 2024 (garbage BCD) or future
-        let minValidDate = DateComponents(calendar: cal, year: 2024, month: 1, day: 1).date!
-        if date < minValidDate { return }
+        // Timestamp validation: discard future dates
         if date.timeIntervalSinceNow > 86400 { return }
         let tsMs = date.timeIntervalSince1970 * 1000
 
@@ -1010,9 +998,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         comps.minute = Self.bcd(b[7])
         comps.second = Int(b[8])
         guard let date = cal.date(from: comps) else { return }
-        // Timestamp validation: discard dates before 2024 (garbage BCD) or future
-        let minValidDate = DateComponents(calendar: cal, year: 2024, month: 1, day: 1).date!
-        if date < minValidDate { return }
+        // Timestamp validation: discard future dates
         if date.timeIntervalSinceNow > 86400 { return }
 
         // Temperature: byte[9] is raw value, byte[10] is decimal flag
@@ -1077,9 +1063,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         comps.hour = Int(b[4])
         comps.minute = Int(b[5])
         guard let date = cal.date(from: comps) else { return }
-        // Timestamp validation: discard dates before 2024 (garbage BCD) or future
-        let minValidDate = DateComponents(calendar: cal, year: 2024, month: 1, day: 1).date!
-        if date < minValidDate { return }
+        // Timestamp validation: discard future dates
         if date.timeIntervalSinceNow > 86400 { return }
 
         // Sleep quality code: 1=deep, 2=light, 3=REM, other=awake
@@ -2202,8 +2186,8 @@ extension QRingPlugin: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         NSLog("[QRing] connected, discovering services…")
-        // Brief settle before service discovery (was 2s, reduced to avoid timeout race)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Gadgetbridge gotcha — let the ring settle 2s before discovering
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             // Discover ALL services (nil filter) so we can see R09's actual
             // GATT tree, not just the Nordic UART we expected. Some Colmi
             // variants expose their control characteristics on a proprietary
