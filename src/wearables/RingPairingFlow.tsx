@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Bluetooth, Heart, Check, RefreshCw, Unplug, Loader2, AlertCircle } from 'lucide-react';
+import { Bluetooth, Heart, Check, RefreshCw, Unplug, Loader2, AlertCircle, Activity } from 'lucide-react';
 import { wearableStore } from './wearable.store';
 import {
   flushSamplesToBackend,
@@ -39,6 +39,7 @@ export default function RingPairingFlow() {
   const [step, setStep] = useState<FlowStep>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
 
   const ringState = wearableStore.getState();
 
@@ -149,6 +150,35 @@ export default function RingPairingFlow() {
     setSyncing(false);
   }
 
+  /**
+   * Trigger an on-demand realtime measurement (PPI/HR streaming for ~60s).
+   * On JStyle: cmd 0x11 (PPI/RR intervals) + cmd 0x28 (manual HR measurement).
+   * On Colmi: cmd 0x69 generic realtime. Plugin auto-routes by vendor.
+   * Samples flow into pendingSamples and flush to backend as they arrive.
+   */
+  async function handleMeasureNow() {
+    setMeasuring(true);
+    toast.info('Medindo... mantenha o anel no dedo por 60s');
+    try {
+      await wearableStore.adapter.enableRealtime('hr' as never);
+      // Wait the duration so the toast/UI reflects the measurement window.
+      // Native side auto-stops after durationSec; we just wait + flush.
+      await new Promise((r) => setTimeout(r, 62_000));
+      const total = Array.from(wearableStore.getState().pendingSamples.values())
+        .reduce((sum, arr) => sum + arr.length, 0);
+      if (total > 0) {
+        const r = await flushSamplesToBackend();
+        toast.success(`Medição concluída · ${r?.inserted ?? total} amostras`);
+      } else {
+        toast.info('Medição rodou — aguarde alguns segundos pra dados aparecerem');
+      }
+    } catch (e) {
+      console.warn('[ring-pairing] measure now failed:', (e as Error)?.message);
+      toast.error('Falha na medição');
+    }
+    setMeasuring(false);
+  }
+
   async function handleDisconnect() {
     forgetPairedQRing();
     await wearableStore.disconnect();
@@ -165,8 +195,10 @@ export default function RingPairingFlow() {
       fwVersion={ringState.diagnostics?.fwVersion ?? null}
       lastSyncAt={ringState.lastSyncAt}
       onSync={handleSyncAll}
+      onMeasureNow={handleMeasureNow}
       onDisconnect={handleDisconnect}
       syncing={syncing}
+      measuring={measuring}
     />;
   }
 
@@ -285,16 +317,20 @@ function ConnectedCard({
   fwVersion,
   lastSyncAt,
   onSync,
+  onMeasureNow,
   onDisconnect,
   syncing,
+  measuring,
 }: {
   device: WearableDevice;
   battery: number | null;
   fwVersion: string | null;
   lastSyncAt: string | null;
   onSync: () => void;
+  onMeasureNow: () => void;
   onDisconnect: () => void;
   syncing: boolean;
+  measuring: boolean;
 }) {
   const lastSyncStr = lastSyncAt
     ? new Date(lastSyncAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -326,20 +362,30 @@ function ConnectedCard({
       <div className="flex gap-2">
         <button
           onClick={onSync}
-          disabled={syncing}
+          disabled={syncing || measuring}
           className="flex-1 rounded-xl border border-border py-2.5 text-xs font-medium text-foreground flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
         >
           <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Sincronizando...' : 'Sincronizar tudo'}
         </button>
         <button
-          onClick={onDisconnect}
-          className="rounded-xl border border-border py-2.5 px-4 text-xs text-destructive flex items-center gap-1.5 active:scale-[0.98]"
+          onClick={onMeasureNow}
+          disabled={syncing || measuring}
+          className="flex-1 rounded-xl py-2.5 text-xs font-medium text-white flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
+          style={{ background: 'hsl(var(--vyr-accent-stable))' }}
         >
-          <Unplug size={14} />
-          Desconectar
+          <Activity size={14} className={measuring ? 'animate-pulse' : ''} />
+          {measuring ? 'Medindo...' : 'Medir Agora'}
         </button>
       </div>
+      <button
+        onClick={onDisconnect}
+        disabled={syncing || measuring}
+        className="w-full rounded-xl border border-border py-2 px-4 text-xs text-destructive flex items-center justify-center gap-1.5 active:scale-[0.98] disabled:opacity-50"
+      >
+        <Unplug size={14} />
+        Desconectar
+      </button>
     </div>
   );
 }
