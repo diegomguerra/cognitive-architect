@@ -88,6 +88,22 @@ class WearableStore {
       console.warn('[wearable] error', code, message);
       this.patch({ status: 'error' });
     });
+
+    // Native plugin emits 'connectionLost' when the ring goes out of range,
+    // firmware drops the link, or BLE stack disconnects. Without this, the
+    // UI was stuck showing "Anel conectado" while the next sync rejected
+    // with NOT_CONNECTED — Diego saw "sync failed not_connect" with no
+    // visible state change. Now we drop connectedDevice + diagnostics so
+    // RingPairingFlow re-renders the "Conectar agora" CTA.
+    const plugin = (window as any).Capacitor?.Plugins?.QRingPlugin;
+    plugin?.addListener?.('connectionLost', (ev: { reason?: string; code?: number; domain?: string }) => {
+      console.warn('[wearable] connectionLost', ev);
+      this.patch({
+        connectedDevice: null,
+        status: 'disconnected',
+        diagnostics: null,
+      });
+    });
   }
 
   getState(): Readonly<WearableState> { return this.state; }

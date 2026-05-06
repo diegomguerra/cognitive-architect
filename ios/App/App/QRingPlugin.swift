@@ -2368,6 +2368,10 @@ extension QRingPlugin: CBCentralManagerDelegate {
             ])
             pendingSyncCall = nil
         }
+        // Stop PPG measurement if it was running — its native timers would
+        // otherwise keep firing against a dead peripheral.
+        jsStopPPGMeasurement(notify: true)
+
         deviceVendor = .unknown
         writeChar = nil
         writeCharV2 = nil
@@ -2382,7 +2386,23 @@ extension QRingPlugin: CBCentralManagerDelegate {
         opQueueV2.removeAll()
         opInFlightV2 = false
         opLockV2.unlock()
-        NSLog("[QRing] disconnected: \(error?.localizedDescription ?? "clean")")
+        let reason = error?.localizedDescription ?? "clean"
+        NSLog("[QRing] disconnected: %@", reason)
+        lastError = "disconnected: \(reason)"
+        emitDebug()
+
+        // Notify the JS layer so the UI can transition out of "connected"
+        // state. Without this, build 367/368 left the card showing "Anel
+        // conectado" even after the ring was out of range — and the next
+        // sync/measure attempt rejected with NOT_CONNECTED with no clue
+        // for the user.
+        let nsErr = error as NSError?
+        notifyListeners("connectionLost", data: [
+            "reason": reason,
+            "code": nsErr?.code ?? 0,
+            "domain": nsErr?.domain ?? "",
+            "deviceId": peripheral.identifier.uuidString,
+        ])
     }
 }
 
