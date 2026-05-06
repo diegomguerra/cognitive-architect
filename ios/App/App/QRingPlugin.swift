@@ -84,9 +84,18 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     // JStyle X3/X5 Commands (different CMD IDs from Colmi)
     private static let JS_CMD_SET_TIME:      UInt8 = 0x01  // same as Colmi
     private static let JS_CMD_SET_USER:      UInt8 = 0x02
-    private static let JS_CMD_REALTIME_PPI:  UInt8 = 0x11  // RR interval stream
+    // cmd 0x78 ppgWithMode — PPG/RR/PPI realtime stream.
+    // Confirmed via disassembly of libBleSDK.a (vendor-sdks/X3 SDK) on 2026-05-05.
+    // The previous 0x11 ("REALTIME_PPI") was a guess from a non-official source
+    // and never produced data on the X5 firmware.
+    // Layout: [0x78, mode, status, ...0..., crc]
+    //   mode 1 = start, 2 = send result, 3 = stop, 4 = progress (status=pct), 5 = quit
+    private static let JS_CMD_PPG: UInt8 = 0x78
     private static let JS_CMD_BATTERY:       UInt8 = 0x13
-    private static let JS_CMD_REALTIME_TEMP: UInt8 = 0x14  // multi-channel temp
+    // NOTE: removed phantom cmds that don't exist in official SDK X3:
+    //   0x14 (was REALTIME_TEMP — only AutomaticTemperature 0x62 exists)
+    //   0x55 (was GET_ONCE_HR — single HR not exposed in SDK X3)
+    //   0x11 (was REALTIME_PPI — replaced by 0x78 ppgWithMode above)
     private static let JS_CMD_GET_VERSION:   UInt8 = 0x27
     private static let JS_CMD_MEASUREMENT:   UInt8 = 0x28  // manual HR/SpO2
     private static let JS_CMD_SET_AUTO:      UInt8 = 0x2A  // auto-monitoring config
@@ -95,7 +104,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let JS_CMD_GET_DETAIL:    UInt8 = 0x52  // 10-min activity detail
     private static let JS_CMD_GET_SLEEP:     UInt8 = 0x53  // sleep history
     private static let JS_CMD_GET_HR:        UInt8 = 0x54  // continuous HR history
-    private static let JS_CMD_GET_ONCE_HR:   UInt8 = 0x55  // single HR measurements
+    // 0x55 GET_ONCE_HR removed — phantom cmd, not in SDK
     private static let JS_CMD_GET_HRV:       UInt8 = 0x56  // HRV + stress + BP
     private static let JS_CMD_GET_SPO2:      UInt8 = 0x57  // SpO2 history
     private static let JS_CMD_GET_TEMP:      UInt8 = 0x62  // temperature history
@@ -172,6 +181,10 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private var jsPendingHistoryCmd: UInt8 = 0  // CMD awaiting continuation
     private var jsHistoryQueue: [UInt8] = []    // remaining history CMDs to request
     private var jsHistoryStepTimer: DispatchWorkItem?  // safety: skip stalled step after 12s
+    private var jsPPGProgressTimer: Timer?             // 1Hz keepalive while measuring
+    private var jsPPGStopTimer: Timer?                 // fires once at durationSec
+    private var jsPPGStartedAt: Date?                  // measurement window start
+    private var jsPPGDurationSec: Int = 60             // configured window length
 
     // V2 temperature packet assembler. V2 responses can span multiple BLE notifications;
     // we accumulate until we have the declared payload length.
@@ -400,6 +413,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         jsHistoryQueue.removeAll()
         jsHistoryStepTimer?.cancel()
         jsHistoryStepTimer = nil
+        jsStopPPGMeasurement(notify: false)
 
         // Late vendor detection: on reconnect from saved UUID, peripheral.name
         // may be nil at connect time. Re-check now that connection is established.
@@ -574,23 +588,18 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self.jsRequestNextHistory()
         }
 
-        // Phase 4: Realtime PPI for RR intervals (t+15s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
-            guard self?.pendingSyncCall != nil else { return }
-            self?.jsSendRealtimePPI(enable: true)
-        }
-
-        // Phase 5: Start manual HR measurement (t+16s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 16.0) { [weak self] in
-            guard self?.pendingSyncCall != nil else { return }
-            self?.jsSendMeasurement(type: 2, enable: true, durationSec: 15) // HR for 15s
-        }
+        // Phases 4-5 (realtime PPI + manual HR during sync) removed in build 368.
+        // Reason: cmd 0x11 was a phantom (not in official SDK X3); manual measurement
+        // with durationSec=15 is below the 30s SDK minimum and was rejected silently.
+        // Realtime PPG/RR/PPI is now triggered via "Medir Agora" button → cmd 0x78
+        // with native 1Hz keepalive timer (jsStartPPGMeasurement).
 
         // Phase 6: Resolve (t+35s)
         DispatchQueue.main.asyncAfter(deadline: .now() + 35.0) { [weak self] in
             guard let self = self else { return }
-            self.jsSendRealtimePPI(enable: false)
-            self.jsSendMeasurement(type: 2, enable: false, durationSec: 0)
+            // Idempotent stop — covers the case where a Medir Agora session is
+            // still running concurrently with sync end.
+            self.jsStopPPGMeasurement(notify: false)
             // Flush any remaining history samples that arrived after their FF marker
             self.flushJStyleType("hr", &self.hrSamples)
             self.flushJStyleType("hrv", &self.hrvSamples)
@@ -729,14 +738,68 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         queueWrite(Data(pkt))
     }
 
-    /// Start/stop realtime PPI (RR interval) streaming.
-    private func jsSendRealtimePPI(enable: Bool) {
+    /// Send a single PPG protocol packet (cmd 0x78 ppgWithMode).
+    /// Mode 1=start, 2=send result, 3=stop, 4=progress (status=pct), 5=quit.
+    /// Confirmed via libBleSDK.a disassembly — see project_jstyle_cmd_bytes.md.
+    private func jsSendPPG(mode: UInt8, status: UInt8) {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
-        pkt[0] = Self.JS_CMD_REALTIME_PPI
-        pkt[1] = enable ? 0x01 : 0x00
+        pkt[0] = Self.JS_CMD_PPG
+        pkt[1] = mode
+        pkt[2] = status
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
+        NSLog("[QRing] PPG cmd: mode=%d status=%d", Int(mode), Int(status))
     }
+
+    /// Start a PPG measurement (realtime PPG/RR/PPI stream from the ring).
+    /// Spawns a 1Hz progress timer (the firmware needs the keepalive — without it,
+    /// it stops emitting data after a few seconds) plus a stop timer at duration end.
+    /// When the stop timer fires, emits a "measurementEnded" event so JS can flush.
+    private func jsStartPPGMeasurement(durationSec: Int) {
+        // Cancel any previous PPG run cleanly first
+        jsStopPPGMeasurement(notify: false)
+
+        // SDK demo uses 30+ seconds — enforce floor
+        let dur = max(durationSec, 30)
+        jsPPGDurationSec = dur
+        jsPPGStartedAt = Date()
+
+        jsSendPPG(mode: 1, status: 0)
+        NSLog("[QRing] PPG measurement started (durationSec=%d)", dur)
+
+        let progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self, let start = self.jsPPGStartedAt else { return }
+            let elapsed = Date().timeIntervalSince(start)
+            let pct = min(100, Int(elapsed / Double(self.jsPPGDurationSec) * 100))
+            self.jsSendPPG(mode: 4, status: UInt8(pct & 0xFF))
+        }
+        jsPPGProgressTimer = progressTimer
+
+        let stopTimer = Timer.scheduledTimer(withTimeInterval: Double(dur), repeats: false) { [weak self] _ in
+            self?.jsStopPPGMeasurement(notify: true)
+        }
+        jsPPGStopTimer = stopTimer
+    }
+
+    /// Stop PPG measurement: invalidate timers, send stop packet, optionally notify JS.
+    /// Idempotent — safe to call repeatedly. notify=false on disconnect/cleanup.
+    private func jsStopPPGMeasurement(notify: Bool) {
+        jsPPGProgressTimer?.invalidate()
+        jsPPGProgressTimer = nil
+        jsPPGStopTimer?.invalidate()
+        jsPPGStopTimer = nil
+
+        let wasActive = jsPPGStartedAt != nil
+        jsPPGStartedAt = nil
+        if wasActive {
+            jsSendPPG(mode: 3, status: 0)  // stop
+            NSLog("[QRing] PPG measurement stopped (notify=%@)", notify ? "true" : "false")
+            if notify {
+                notifyListeners("measurementEnded", data: ["type": "ppg"])
+            }
+        }
+    }
+
 
     /// Start/stop manual measurement (HR, SpO2, etc.)
     /// type: 2=HR, 3=SpO2, 4=ContSpO2
@@ -882,14 +945,14 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 jsSendHistoryRequest(cmd: Self.JS_CMD_GET_SLEEP, mode: 0x02)
             }
 
-        case Self.JS_CMD_REALTIME_PPI:  // 0x11 — PPI/RRI realtime
-            parseJStylePPI(b)
+        case Self.JS_CMD_PPG:  // 0x78 — PPG realtime stream + ack/progress/result
+            // Bytes captured in debug_raw; server-side parser will decode the
+            // various sub-types (ppgStartSucessed=71, realtimePPGData=70, ppgResult=73,
+            // ppgMeasurementProgress=76, etc) once we have fixtures.
+            NSLog("[QRing] PPG response received (%d bytes)", b.count)
 
         case Self.JS_CMD_MEASUREMENT:  // 0x28 — manual HR/SpO2 result
             parseJStyleMeasurement(b)
-
-        case Self.JS_CMD_REALTIME_TEMP:  // 0x14
-            parseJStyleRealtimeTemp(b)
 
         default:
             NSLog("[QRing] JStyle unhandled cmd 0x%02X", cmd)
@@ -1145,23 +1208,6 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         ])
     }
 
-    /// Parse JStyle realtime PPI/RRI (0x11).
-    private func parseJStylePPI(_ b: [UInt8]) {
-        // b[1..2] = RRI in ms (LE16)
-        guard b.count >= 3 else { return }
-        let rri = Int(b[1]) | (Int(b[2]) << 8)
-        if (300...2000).contains(rri) {
-            realtimeRRIntervals.append(rri)
-            rrIntervalSamples.append([
-                "type": "rr_interval",
-                "ts": nowMsUnique(),
-                "value": rri,
-                "source": "qring_ble",
-                "payload_json": ["mode": "jstyle_realtime_ppi"],
-            ])
-        }
-    }
-
     /// Parse JStyle manual measurement result (0x28).
     private func parseJStyleMeasurement(_ b: [UInt8]) {
         guard b.count >= 4 else { return }
@@ -1188,22 +1234,6 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Parse JStyle realtime temperature (0x14).
-    private func parseJStyleRealtimeTemp(_ b: [UInt8]) {
-        guard b.count >= 3 else { return }
-        let rawTemp = Int(b[1]) | (Int(b[2]) << 8)
-        let celsius = Double(rawTemp) / 10.0
-        if (25.0...42.0).contains(celsius) {
-            tempSamples.append([
-                "type": "temp",
-                "ts": nowMsUnique(),
-                "value": celsius,
-                "source": "qring_ble",
-                "payload_json": ["mode": "jstyle_realtime"],
-            ])
-        }
-    }
-
     private func flushRealtimeBatch(type: String, samples: inout [[String: Any]]) {
         guard !samples.isEmpty else { return }
         notifyListeners("syncData", data: ["type": type, "samples": samples])
@@ -1215,22 +1245,30 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         let type = call.getString("type") ?? "hr"
         let durationSec = call.getInt("durationSec") ?? 60
 
-        // JStyle path: cmd 0x11 PPI realtime stream + cmd 0x28 manual measurement.
-        // The Colmi cmd 0x69 below does nothing on a JStyle ring (different proto).
+        // JStyle path: cmd 0x78 ppgWithMode for PPG/RR/PPI realtime streaming.
+        // Native 1Hz progress timer keeps the ring transmitting; native stop timer
+        // ends measurement at durationSec and emits a "measurementEnded" event so JS
+        // can flush samples without relying on a JS setTimeout (iOS pauses JS timers
+        // when the app is in background — that's why the previous build hung at
+        // "Medindo..." indefinitely).
+        // For SpO2, fall back to manualMeasurement (cmd 0x28) since SpO2 doesn't have
+        // its own PPG path in the SDK demo.
         if deviceVendor == .jstyle {
             switch type {
-            case "hr":
-                jsSendMeasurement(type: 2, enable: true, durationSec: durationSec)
-                jsSendRealtimePPI(enable: true)
+            case "hr", "ppg", "ppi", "hrv":
+                jsStartPPGMeasurement(durationSec: durationSec)
             case "spo2":
-                jsSendMeasurement(type: 3, enable: true, durationSec: durationSec)
-            case "hrv", "ppi":
-                jsSendRealtimePPI(enable: true)
+                let dur = max(durationSec, 30)
+                jsSendMeasurement(type: 3, enable: true, durationSec: dur)
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(dur)) { [weak self] in
+                    self?.jsSendMeasurement(type: 3, enable: false, durationSec: 0)
+                    self?.notifyListeners("measurementEnded", data: ["type": "spo2"])
+                }
             default:
                 call.reject("UNKNOWN_REALTIME_TYPE: \(type)")
                 return
             }
-            call.resolve(["started": true, "vendor": "jstyle", "durationSec": durationSec])
+            call.resolve(["started": true, "vendor": "jstyle", "durationSec": durationSec, "cmd": "0x78"])
             return
         }
 

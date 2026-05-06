@@ -151,32 +151,60 @@ export default function RingPairingFlow() {
   }
 
   /**
-   * Trigger an on-demand realtime measurement (PPI/HR streaming for ~60s).
-   * On JStyle: cmd 0x11 (PPI/RR intervals) + cmd 0x28 (manual HR measurement).
+   * Trigger an on-demand realtime measurement (~60s window).
+   * On JStyle: cmd 0x78 ppgWithMode (start/progress 1Hz/stop) — PPG/RR/PPI stream.
    * On Colmi: cmd 0x69 generic realtime. Plugin auto-routes by vendor.
-   * Samples flow into pendingSamples and flush to backend as they arrive.
+   *
+   * Native side runs the timer + emits "measurementEnded" event when the window
+   * closes. We listen for that event AND set a 90s fallback (in case the native
+   * event is lost or the app is force-quit). The measuring state is always
+   * cleaned up in `finally`, so the UI can never get stuck like in build 367.
    */
   async function handleMeasureNow() {
+    if (measuring) return;
     setMeasuring(true);
     toast.info('Medindo... mantenha o anel no dedo por 60s');
+
+    let endHandle: ReturnType<typeof setTimeout> | null = null;
+    let endedListener: { remove?: () => void } | null = null;
+    let resolveEnded: (() => void) | null = null;
+    const endedPromise = new Promise<void>((res) => { resolveEnded = res; });
+
     try {
+      const plugin = (window as any).Capacitor?.Plugins?.QRingPlugin;
+      if (plugin?.addListener) {
+        endedListener = await plugin.addListener('measurementEnded', () => {
+          resolveEnded?.();
+        });
+      }
+      // Safety fallback in case the native event is lost (max 90s — native
+      // configures 60s + ~5s flush headroom + buffer).
+      const safety = new Promise<void>((res) => {
+        endHandle = setTimeout(() => {
+          console.warn('[medir-agora] safety fallback fired (90s)');
+          res();
+        }, 90_000);
+      });
+
       await wearableStore.adapter.enableRealtime('hr' as never);
-      // Wait the duration so the toast/UI reflects the measurement window.
-      // Native side auto-stops after durationSec; we just wait + flush.
-      await new Promise((r) => setTimeout(r, 62_000));
+      await Promise.race([endedPromise, safety]);
+
       const total = Array.from(wearableStore.getState().pendingSamples.values())
         .reduce((sum, arr) => sum + arr.length, 0);
       if (total > 0) {
         const r = await flushSamplesToBackend();
         toast.success(`Medição concluída · ${r?.inserted ?? total} amostras`);
       } else {
-        toast.info('Medição rodou — aguarde alguns segundos pra dados aparecerem');
+        toast.info('Medição concluída — dados podem aparecer em segundos');
       }
     } catch (e) {
       console.warn('[ring-pairing] measure now failed:', (e as Error)?.message);
       toast.error('Falha na medição');
+    } finally {
+      if (endHandle) clearTimeout(endHandle);
+      try { endedListener?.remove?.(); } catch { /* ignore */ }
+      setMeasuring(false);
     }
-    setMeasuring(false);
   }
 
   async function handleDisconnect() {
