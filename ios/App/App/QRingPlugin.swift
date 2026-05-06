@@ -219,7 +219,16 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     override public func load() {
-        central = CBCentralManager(delegate: self, queue: DispatchQueue.main)
+        // State restoration keeps the BLE session alive when iOS suspends the
+        // app (screen lock, backgrounding). Without it, `tela fecha = peripheral
+        // stale = reconnect needs manual click`. The restore identifier must be
+        // a stable string per-app. willRestoreState below rehydrates the
+        // peripheral so a connect call right after wake works.
+        central = CBCentralManager(
+            delegate: self,
+            queue: DispatchQueue.main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "VyrQRingCentral"]
+        )
     }
 
     // MARK: - Capacitor API
@@ -314,10 +323,13 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             CBConnectPeripheralOptionNotifyOnConnectionKey: true,
             CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
         ])
-        // 20s connection timeout — BLE can be slow (adv interval + 2s settle + char discovery)
+        // 20s connection timeout — BLE can be slow (adv interval + 1.5s settle + char discovery)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self = self, self.connectCall != nil else { return }
             self.central.cancelPeripheralConnection(p)
+            let st = self.central.state.rawValue
+            self.lastError = "CONNECT_TIMEOUT after 20s (central.state=\(st), services=\(self.discoveredServices.count), chars=\(self.discoveredCharacteristics.count))"
+            self.emitDebug()
             self.connectCall?.reject("CONNECT_TIMEOUT")
             self.connectCall = nil
         }
@@ -2202,8 +2214,12 @@ extension QRingPlugin: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         NSLog("[QRing] connected, discovering services…")
-        // Brief settle before service discovery (was 2s, reduced to avoid timeout race)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // 1.5s settle before service discovery. Build 360 dropped this to 0.5s
+        // chasing a phantom timeout race; that turned out to break JStyle X3/X5
+        // service discovery silently (didConnect fires but discoverServices gets
+        // an empty/incomplete tree → connect hangs until the 20s timeout). 1.5s
+        // is the conservative middle ground vs the original 2.0s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             // Discover ALL services (nil filter) so we can see R09's actual
             // GATT tree, not just the Nordic UART we expected. Some Colmi
             // variants expose their control characteristics on a proprietary
@@ -2213,8 +2229,26 @@ extension QRingPlugin: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        connectCall?.reject("CONNECT_FAILED: \(error?.localizedDescription ?? "unknown")")
+        let msg = error?.localizedDescription ?? "unknown"
+        let nsErr = error as NSError?
+        let detail = nsErr.map { "code=\($0.code) domain=\($0.domain) — \(msg)" } ?? msg
+        NSLog("[QRing] didFailToConnect: %@", detail)
+        lastError = "didFailToConnect: \(detail)"
+        emitDebug()
+        connectCall?.reject("CONNECT_FAILED: \(detail)")
         connectCall = nil
+    }
+
+    /// Called by iOS when the app is relaunched and CoreBluetooth has restored
+    /// state from a previous session. Rehydrate `discoveredPeripherals` so a
+    /// follow-up `connect(deviceId:)` from JS works without a fresh scan.
+    public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        guard let restored = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] else { return }
+        NSLog("[QRing] willRestoreState restored=%d peripherals", restored.count)
+        for p in restored {
+            discoveredPeripherals[p.identifier] = p
+            p.delegate = self
+        }
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -2265,7 +2299,11 @@ extension QRingPlugin: CBCentralManagerDelegate {
 extension QRingPlugin: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard error == nil else {
-            connectCall?.reject("SERVICE_DISCOVERY_FAILED: \(error!.localizedDescription)")
+            let msg = error!.localizedDescription
+            NSLog("[QRing] didDiscoverServices error: %@", msg)
+            lastError = "SERVICE_DISCOVERY_FAILED: \(msg)"
+            emitDebug()
+            connectCall?.reject("SERVICE_DISCOVERY_FAILED: \(msg)")
             connectCall = nil
             return
         }
