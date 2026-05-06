@@ -171,6 +171,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     // JStyle history pagination state
     private var jsPendingHistoryCmd: UInt8 = 0  // CMD awaiting continuation
     private var jsHistoryQueue: [UInt8] = []    // remaining history CMDs to request
+    private var jsHistoryStepTimer: DispatchWorkItem?  // safety: skip stalled step after 12s
 
     // V2 temperature packet assembler. V2 responses can span multiple BLE notifications;
     // we accumulate until we have the declared payload length.
@@ -397,6 +398,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         sampleSeq = 0
         jsPendingHistoryCmd = 0
         jsHistoryQueue.removeAll()
+        jsHistoryStepTimer?.cancel()
+        jsHistoryStepTimer = nil
 
         // Late vendor detection: on reconnect from saved UUID, peripheral.name
         // may be nil at connect time. Re-check now that connection is established.
@@ -625,14 +628,43 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Request next history command from queue. Called after each history completes.
+    /// Includes a 12s safety timeout per step — some firmwares don't emit a
+    /// reliable end marker for every history type (e.g. HRV 0x56 sometimes never
+    /// raises FF), which used to stall the queue and prevent downstream cmds
+    /// (SpO2, Temp, Steps, Sleep) from ever running. The timer flushes whatever
+    /// arrived for the stalled type and moves on.
     private func jsRequestNextHistory() {
+        jsHistoryStepTimer?.cancel()
+        jsHistoryStepTimer = nil
         guard !jsHistoryQueue.isEmpty else {
             NSLog("[QRing] JStyle history queue empty — all done")
+            jsPendingHistoryCmd = 0
             return
         }
         let cmd = jsHistoryQueue.removeFirst()
         jsPendingHistoryCmd = cmd
         jsSendHistoryRequest(cmd: cmd, mode: 0x00) // mode 0x00 = start
+
+        let timer = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if self.jsPendingHistoryCmd == cmd {
+                NSLog("[QRing] history step 0x%02X timed out after 12s — forcing next", cmd)
+                switch cmd {
+                case Self.JS_CMD_GET_HR:    self.flushJStyleType("hr", &self.hrSamples)
+                case Self.JS_CMD_GET_HRV:
+                    self.flushJStyleType("hrv", &self.hrvSamples)
+                    self.flushJStyleType("stress", &self.stressSamples)
+                case Self.JS_CMD_GET_SPO2:  self.flushJStyleType("spo2", &self.spo2Samples)
+                case Self.JS_CMD_GET_TEMP:  self.flushJStyleType("temp", &self.tempSamples)
+                case Self.JS_CMD_GET_TOTAL: self.flushJStyleType("steps", &self.stepsSamples)
+                case Self.JS_CMD_GET_SLEEP: self.flushJStyleType("sleep", &self.sleepSamples)
+                default: break
+                }
+                self.jsRequestNextHistory()
+            }
+        }
+        jsHistoryStepTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12.0, execute: timer)
     }
 
     /// Send a JStyle history request with pagination mode.
@@ -1181,6 +1213,28 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func enableRealtime(_ call: CAPPluginCall) {
         let type = call.getString("type") ?? "hr"
+        let durationSec = call.getInt("durationSec") ?? 60
+
+        // JStyle path: cmd 0x11 PPI realtime stream + cmd 0x28 manual measurement.
+        // The Colmi cmd 0x69 below does nothing on a JStyle ring (different proto).
+        if deviceVendor == .jstyle {
+            switch type {
+            case "hr":
+                jsSendMeasurement(type: 2, enable: true, durationSec: durationSec)
+                jsSendRealtimePPI(enable: true)
+            case "spo2":
+                jsSendMeasurement(type: 3, enable: true, durationSec: durationSec)
+            case "hrv", "ppi":
+                jsSendRealtimePPI(enable: true)
+            default:
+                call.reject("UNKNOWN_REALTIME_TYPE: \(type)")
+                return
+            }
+            call.resolve(["started": true, "vendor": "jstyle", "durationSec": durationSec])
+            return
+        }
+
+        // Colmi path: cmd 0x69 generic realtime
         let subType: UInt8
         switch type {
         case "hr":   subType = Self.RT_TYPE_HR
@@ -1191,7 +1245,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         sendRealtime(type: subType)
-        call.resolve(["started": true])
+        call.resolve(["started": true, "vendor": "colmi"])
     }
 
     /// Start realtime stream for a single biomarker type (0x69 request).
