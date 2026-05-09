@@ -3,189 +3,194 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>VYR · Insights · mockup v1</title>
+<title>VYR · Insights · mockup v2</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #0a0e14;
-  --bg-elev: #11161e;
-  --card: #131820;
-  --card-border: #1c2330;
-  --text: #e8eaed;
-  --text-dim: #9ca3af;
-  --text-muted: #6b7280;
-  --accent: #d4d4d8;
-  --good: #6ee7b7;
-  --good-soft: #064e3b;
-  --warn: #fcd34d;
-  --warn-soft: #78350f;
-  --bad: #fca5a5;
-  --bad-soft: #7f1d1d;
-  --hr: #f472b6;
-  --hrv: #c4b5fd;
-  --sleep-deep: #4338ca;
-  --sleep-light: #818cf8;
-  --sleep-rem: #c4b5fd;
-  --sleep-awake: #fca5a5;
-  --steps: #fbbf24;
-  --temp: #fb923c;
-  --spo2: #67e8f9;
-  --battery: #86efac;
+  --bg: hsl(225 14% 6%);
+  --bg-elev: hsl(223 16% 9%);
+  --card: hsl(223 16% 9%);
+  --card-2: hsl(222 17% 13%);
+  --card-border: hsl(225 18% 17%);
+  --text: hsl(220 20% 94%);
+  --text-dim: hsl(219 10% 69%);
+  --text-muted: hsl(218 8% 47%);
+  --accent: hsl(220 25% 45%);
+  --good: hsl(150 55% 65%);
+  --warn: hsl(42 80% 65%);
+  --bad: hsl(0 70% 70%);
+  --hr: hsl(340 70% 70%);
+  --hrv: hsl(265 65% 75%);
+  --sleep-deep: hsl(240 60% 55%);
+  --sleep-light: hsl(230 70% 70%);
+  --sleep-rem: hsl(265 70% 75%);
+  --sleep-awake: hsl(0 70% 75%);
+  --steps: hsl(40 80% 60%);
+  --temp: hsl(20 80% 65%);
+  --spo2: hsl(190 70% 70%);
+  --battery: hsl(140 60% 65%);
+  --energia: hsl(190 70% 60%);
+  --clareza: hsl(50 75% 65%);
+  --estabilidade: hsl(280 55% 70%);
   --serif: 'Cormorant Garamond', Georgia, serif;
   --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
 html, body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
-body { min-height: 100vh; padding-bottom: 90px; max-width: 480px; margin: 0 auto; }
+body { min-height: 100vh; padding-bottom: 96px; max-width: 480px; margin: 0 auto; }
 .app-shell { padding: 0 16px; }
+button { font-family: inherit; }
 
-/* ===== top bar ===== */
-.top-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 16px 12px; position: sticky; top: 0;
-  background: linear-gradient(180deg, var(--bg) 70%, transparent);
-  z-index: 10;
-}
-.top-bar .brand { font-family: var(--serif); font-size: 22px; font-weight: 500; letter-spacing: 0.02em; }
-.top-bar .device-pill {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--text-dim);
-  background: var(--card); border: 1px solid var(--card-border);
-  padding: 6px 10px; border-radius: 99px;
-}
-.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+/* top bar */
+.top-bar { display:flex; align-items:center; justify-content:space-between; padding:18px 16px 12px; position:sticky; top:0; background:linear-gradient(180deg,var(--bg) 70%,transparent); z-index:10; }
+.brand { font-family:var(--serif); font-size:22px; font-weight:500; letter-spacing:.04em; }
+.device-pill { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); background:var(--card); border:1px solid var(--card-border); padding:6px 10px; border-radius:99px; }
+.dot { width:6px; height:6px; border-radius:50%; background:var(--good); box-shadow:0 0 8px var(--good); }
 
-/* ===== greeting ===== */
-.greeting { padding: 8px 0 18px; }
-.greeting .date { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px; }
-.greeting h1 { font-family: var(--serif); font-size: 28px; font-weight: 400; line-height: 1.15; }
-.greeting h1 em { font-style: italic; color: var(--text-dim); }
+/* greeting */
+.greeting { padding:8px 0 18px; }
+.greeting .date { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.12em; margin-bottom:4px; }
+.greeting h1 { font-family:var(--serif); font-size:28px; font-weight:400; line-height:1.15; }
+.greeting h1 em { font-style:italic; color:var(--text-dim); }
 
-/* ===== score row ===== */
-.score-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 24px; }
-.score-card {
-  background: var(--card); border: 1px solid var(--card-border); border-radius: 18px;
-  padding: 14px 10px 12px; text-align: center;
-}
-.score-donut { position: relative; width: 78px; height: 78px; margin: 0 auto 8px; }
-.score-donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
-.score-donut .bg-ring { fill: none; stroke: var(--card-border); stroke-width: 5; }
-.score-donut .fg-ring { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset 0.6s; }
-.score-donut .label {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-}
-.score-donut .label .num { font-family: var(--serif); font-size: 28px; font-weight: 500; line-height: 1; }
-.score-donut .label .max { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
-.score-card .name { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; }
-.score-card .delta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
-.score-card .delta.up { color: var(--good); }
-.score-card .delta.down { color: var(--bad); }
+/* ===== HOME — VYR State central ===== */
+.vyr-state-hero { background:linear-gradient(180deg, var(--card) 0%, var(--bg-elev) 100%); border:1px solid var(--card-border); border-radius:24px; padding:20px 16px; margin-bottom:14px; text-align:center; }
+.vyr-state-hero .phase-tag { display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:.2em; color:var(--text-dim); padding:4px 10px; border:1px solid var(--card-border); border-radius:99px; margin-bottom:14px; }
+.vyr-state-hero .donut-big { position:relative; width:170px; height:170px; margin:0 auto; }
+.vyr-state-hero .donut-big svg { width:100%; height:100%; transform:rotate(-90deg); }
+.vyr-state-hero .donut-big .bg-ring { fill:none; stroke:var(--card-border); stroke-width:6; }
+.vyr-state-hero .donut-big .fg-ring { fill:none; stroke-width:6; stroke-linecap:round; }
+.vyr-state-hero .donut-big .label { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.vyr-state-hero .donut-big .label .lbl-top { font-family:var(--mono); font-size:9px; letter-spacing:.2em; color:var(--text-muted); text-transform:uppercase; }
+.vyr-state-hero .donut-big .label .num { font-family:var(--serif); font-size:62px; font-weight:500; line-height:1; margin-top:6px; }
+.vyr-state-hero .donut-big .label .lbl { font-size:13px; color:var(--text-dim); margin-top:4px; }
+.pillars-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:18px; }
+.pillar { padding:10px 6px; }
+.pillar .name { font-family:var(--mono); font-size:9px; letter-spacing:.18em; text-transform:uppercase; color:var(--text-muted); margin-bottom:6px; }
+.pillar .bar { width:100%; height:4px; background:var(--card-border); border-radius:2px; overflow:hidden; }
+.pillar .bar > div { height:100%; border-radius:2px; }
+.pillar .v { font-family:var(--mono); font-size:14px; margin-top:6px; color:var(--text); }
+.pillar .v small { color:var(--text-muted); font-size:10px; }
 
-/* ===== section ===== */
-section { margin-bottom: 28px; }
-.section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
-.section-head h2 { font-family: var(--serif); font-size: 18px; font-weight: 500; letter-spacing: 0.01em; }
-.section-head .more { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; }
+/* score row 3 donuts (Today) */
+.score-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:16px; }
+.score-card { background:var(--card); border:1px solid var(--card-border); border-radius:18px; padding:14px 10px 12px; text-align:center; }
+.donut-sm { position:relative; width:78px; height:78px; margin:0 auto 8px; }
+.donut-sm svg { width:100%; height:100%; transform:rotate(-90deg); }
+.donut-sm .bg-ring { fill:none; stroke:var(--card-border); stroke-width:5; }
+.donut-sm .fg-ring { fill:none; stroke-width:5; stroke-linecap:round; }
+.donut-sm .label { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.donut-sm .num { font-family:var(--serif); font-size:28px; font-weight:500; line-height:1; }
+.donut-sm .max { font-size:9px; color:var(--text-muted); margin-top:2px; }
+.score-card .name { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.1em; }
+.score-card .delta { font-size:10px; color:var(--text-muted); margin-top:2px; }
+.score-card .delta.up { color:var(--good); }
+.score-card .delta.down { color:var(--bad); }
 
-/* ===== generic card ===== */
-.card {
-  background: var(--card); border: 1px solid var(--card-border); border-radius: 16px;
-  padding: 16px; margin-bottom: 10px;
-}
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-.card-title { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
-.card-title .ic { width: 16px; height: 16px; opacity: 0.8; }
-.card-value { display: flex; align-items: baseline; gap: 6px; }
-.card-value .big { font-family: var(--serif); font-size: 36px; font-weight: 500; line-height: 1; }
-.card-value .unit { font-size: 12px; color: var(--text-muted); }
-.card-sub { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
-.card-sub .ok { color: var(--good); }
-.card-sub .warn { color: var(--warn); }
-.card-sub .bad { color: var(--bad); }
+/* sections */
+section { margin-bottom:26px; }
+.section-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+.section-head h2 { font-family:var(--serif); font-size:18px; font-weight:500; letter-spacing:.01em; }
+.section-head .more { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.1em; cursor:pointer; }
 
-/* baseline range bar */
-.range-bar {
-  position: relative; height: 6px; background: var(--card-border); border-radius: 3px; margin-top: 14px;
-}
-.range-bar .baseline { position: absolute; top: 0; bottom: 0; background: var(--text-muted); opacity: 0.35; border-radius: 3px; }
-.range-bar .marker {
-  position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%;
-  background: var(--text); border: 2px solid var(--card); transform: translateX(-50%);
-  box-shadow: 0 0 0 2px var(--text);
-}
-.range-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--text-muted); }
+/* generic card */
+.card { background:var(--card); border:1px solid var(--card-border); border-radius:16px; padding:16px; margin-bottom:10px; }
+.card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.card-title { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
+.card-title .ic { width:16px; height:16px; opacity:.85; }
+.card-value { display:flex; align-items:baseline; gap:6px; }
+.card-value .big { font-family:var(--serif); font-size:36px; font-weight:500; line-height:1; }
+.card-value .unit { font-size:12px; color:var(--text-muted); }
+.card-sub { font-size:11px; color:var(--text-muted); margin-top:6px; }
+.card-sub .ok { color:var(--good); }
+.card-sub .warn { color:var(--warn); }
+.card-sub .bad { color:var(--bad); }
 
-/* ===== sleep stages bar ===== */
-.sleep-stages {
-  display: flex; height: 36px; border-radius: 4px; overflow: hidden; margin-top: 12px;
-}
-.sleep-stages > div { display: flex; align-items: flex-end; }
-.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
-.legend-item .swatch { width: 10px; height: 10px; border-radius: 2px; }
+/* baseline range */
+.range-bar { position:relative; height:6px; background:var(--card-border); border-radius:3px; margin-top:14px; }
+.range-bar .baseline { position:absolute; top:0; bottom:0; background:var(--text-muted); opacity:.35; border-radius:3px; }
+.range-bar .marker { position:absolute; top:-3px; width:12px; height:12px; border-radius:50%; background:var(--text); border:2px solid var(--card); transform:translateX(-50%); box-shadow:0 0 0 2px var(--text); }
+.range-labels { display:flex; justify-content:space-between; margin-top:6px; font-size:10px; color:var(--text-muted); }
 
-.stage-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
-.stage-stat { text-align: center; padding: 8px 0; border-top: 1px solid var(--card-border); }
-.stage-stat .v { font-family: var(--serif); font-size: 16px; font-weight: 500; }
-.stage-stat .l { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 2px; }
+/* sleep stages bar */
+.sleep-stages { display:flex; height:36px; border-radius:4px; overflow:hidden; margin-top:12px; gap:1px; }
+.sleep-stages > div { transition:flex .3s; }
+.legend { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; }
+.legend-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); }
+.legend-item .swatch { width:10px; height:10px; border-radius:2px; }
+.stage-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:16px; }
+.stage-stat { text-align:center; padding:8px 0; border-top:1px solid var(--card-border); }
+.stage-stat .v { font-family:var(--serif); font-size:18px; font-weight:500; }
+.stage-stat .v small { font-size:11px; color:var(--text-muted); margin-left:1px; }
+.stage-stat .l { font-size:9px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.1em; margin-top:2px; }
 
-/* ===== HR trend mini chart ===== */
-.trend {
-  width: 100%; height: 64px; margin-top: 12px;
-}
-.trend svg { width: 100%; height: 100%; }
-.trend .line { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.trend .area { opacity: 0.18; }
-.trend .axis-label { fill: var(--text-muted); font-size: 9px; }
+/* trend mini chart */
+.trend { width:100%; height:64px; margin-top:12px; }
+.trend svg { width:100%; height:100%; }
+.trend .line { fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.trend .area { opacity:.18; }
 
-/* ===== weekly bars (insights tab) ===== */
-.weekly { display: flex; gap: 6px; align-items: flex-end; height: 90px; margin-top: 10px; }
-.weekly .bar {
-  flex: 1; border-radius: 4px 4px 2px 2px;
-  background: linear-gradient(180deg, var(--text-dim), var(--card-border));
-  position: relative; min-height: 2px;
-}
-.weekly .bar .lbl { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--text-muted); }
+/* weekly bars */
+.weekly { display:flex; gap:6px; align-items:flex-end; height:90px; margin-top:10px; }
+.weekly .bar { flex:1; border-radius:4px 4px 2px 2px; position:relative; min-height:2px; }
+.weekly .bar .lbl { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:9px; color:var(--text-muted); }
+.weekly .bar .vlbl { position:absolute; top:-14px; left:50%; transform:translateX(-50%); font-size:9px; color:var(--text-dim); font-family:var(--mono); }
 
-/* ===== Battery + small KPI ===== */
-.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.kpi {
-  background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;
-}
-.kpi .ic { width: 18px; height: 18px; opacity: 0.7; margin-bottom: 8px; }
-.kpi .lbl { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
-.kpi .val { font-family: var(--serif); font-size: 24px; font-weight: 500; margin-top: 4px; }
-.kpi .sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+/* Vitais sub-tabs */
+.subtabs { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:14px; -webkit-overflow-scrolling:touch; }
+.subtabs::-webkit-scrollbar { display:none; }
+.subtab { background:var(--card); border:1px solid var(--card-border); color:var(--text-dim); padding:8px 14px; border-radius:99px; font-size:12px; white-space:nowrap; cursor:pointer; transition:all .15s; }
+.subtab.active { background:var(--text); color:var(--bg); border-color:var(--text); }
 
-/* ===== bottom nav ===== */
-.bottom-nav {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  background: rgba(10, 14, 20, 0.95); backdrop-filter: blur(20px);
-  border-top: 1px solid var(--card-border);
-  padding: 10px 0 calc(env(safe-area-inset-bottom) + 8px); z-index: 100;
-}
-.bottom-nav-inner { max-width: 480px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
-.nav-tab {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 4px; cursor: pointer; color: var(--text-muted);
-  background: none; border: none; font-family: inherit;
-}
-.nav-tab.active { color: var(--text); }
-.nav-tab.active .ic { color: var(--good); }
-.nav-tab .ic { width: 22px; height: 22px; }
-.nav-tab .lbl { font-size: 10px; letter-spacing: 0.04em; }
+/* kpi grid */
+.kpi-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.kpi { background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:14px; }
+.kpi .ic { width:18px; height:18px; opacity:.7; margin-bottom:8px; }
+.kpi .lbl { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
+.kpi .val { font-family:var(--serif); font-size:24px; font-weight:500; margin-top:4px; }
+.kpi .sub { font-size:10px; color:var(--text-muted); margin-top:2px; }
 
-/* ===== tabs (panel switcher) ===== */
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
+/* bottom nav */
+.bottom-nav { position:fixed; bottom:0; left:0; right:0; background:rgba(15,17,22,.96); backdrop-filter:blur(20px); border-top:1px solid var(--card-border); padding:10px 0 calc(env(safe-area-inset-bottom) + 8px); z-index:100; }
+.bottom-nav-inner { max-width:480px; margin:0 auto; display:grid; grid-template-columns:repeat(5,1fr); gap:4px; }
+.nav-tab { display:flex; flex-direction:column; align-items:center; gap:4px; padding:4px; cursor:pointer; color:var(--text-muted); background:none; border:none; }
+.nav-tab.active { color:var(--text); }
+.nav-tab.active .ic { color:var(--good); }
+.nav-tab .ic { width:22px; height:22px; }
+.nav-tab .lbl { font-size:10px; letter-spacing:.04em; }
 
-/* ===== misc ===== */
-.spark { width: 70px; height: 24px; }
-.spark path { fill: none; stroke-width: 1.5; stroke-linecap: round; }
-.note { font-size: 11px; color: var(--text-muted); padding: 8px 12px; background: var(--bg-elev); border-radius: 8px; border-left: 2px solid var(--warn); margin-top: 12px; }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
+.subpanel { display:none; }
+.subpanel.active { display:block; }
+
+.note { font-size:11px; color:var(--text-muted); padding:10px 12px; background:var(--bg-elev); border-radius:8px; border-left:2px solid var(--warn); margin-top:12px; line-height:1.5; }
+.note.info { border-left-color:var(--accent); }
+
+/* weekly report modal */
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:200; display:none; }
+.modal-overlay.open { display:flex; align-items:flex-start; padding-top:40px; overflow-y:auto; }
+.modal { background:var(--bg); width:100%; max-width:480px; margin:0 auto; padding:0 16px 60px; border-radius:24px 24px 0 0; }
+.modal-head { display:flex; justify-content:space-between; align-items:center; padding:20px 0 8px; position:sticky; top:0; background:var(--bg); }
+.modal-head .close { background:var(--card); border:1px solid var(--card-border); color:var(--text); width:32px; height:32px; border-radius:50%; cursor:pointer; font-size:16px; }
+
+/* report styles */
+.report-section { margin-bottom:22px; }
+.report-section h3 { font-family:var(--serif); font-size:18px; font-weight:500; margin-bottom:8px; }
+.report-section .desc { font-size:12px; color:var(--text-dim); margin-bottom:14px; }
+.report-stat { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--card-border); }
+.report-stat .l { font-size:12px; color:var(--text-dim); }
+.report-stat .v { font-family:var(--mono); font-size:13px; }
+.report-cta { display:block; width:100%; background:var(--text); color:var(--bg); padding:14px; border-radius:12px; font-size:13px; font-weight:600; text-align:center; cursor:pointer; border:none; margin-top:10px; }
+
+/* score formula box */
+.formula-box { background:var(--bg-elev); border:1px solid var(--card-border); border-radius:12px; padding:14px; margin-top:14px; font-size:12px; line-height:1.7; color:var(--text-dim); }
+.formula-box .h { font-family:var(--mono); font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.15em; margin-bottom:8px; }
+.formula-box .row { display:flex; justify-content:space-between; }
+.formula-box code { font-family:var(--mono); font-size:11px; color:var(--text); }
 </style>
 </head>
 <body>
@@ -197,316 +202,405 @@ section { margin-bottom: 28px; }
 
 <main class="app-shell">
 
-  <!-- ===========================================================
-       TAB: TODAY  (resumo do dia, scores agregados)
-  ============================================================ -->
-  <div class="tab-panel active" data-tab="today">
+  <!-- =============== HOME (VYR State) =============== -->
+  <div class="tab-panel active" data-tab="home">
     <div class="greeting">
       <div class="date">Sábado, 09 de Maio</div>
-      <h1>Bom dia, <em>Diego</em></h1>
+      <h1>Olá, <em>Diego</em></h1>
     </div>
 
-    <div class="score-row">
-      <div class="score-card">
-        <div class="score-donut">
-          <svg viewBox="0 0 100 100">
-            <circle class="bg-ring" cx="50" cy="50" r="44"/>
-            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#6ee7b7"
-              stroke-dasharray="276.46" stroke-dashoffset="63.6"/>
-          </svg>
-          <div class="label"><div class="num">77</div><div class="max">/ 100</div></div>
+    <div class="vyr-state-hero">
+      <div class="phase-tag">FASE · HOLD</div>
+      <div class="donut-big">
+        <svg viewBox="0 0 100 100">
+          <circle class="bg-ring" cx="50" cy="50" r="44"/>
+          <circle class="fg-ring" cx="50" cy="50" r="44" stroke="hsl(42 80% 65%)"
+            stroke-dasharray="276.46" stroke-dashoffset="160.4"/>
+        </svg>
+        <div class="label">
+          <div class="lbl-top">VYR State</div>
+          <div class="num">42</div>
+          <div class="lbl">Baixo</div>
         </div>
-        <div class="name">Readiness</div>
-        <div class="delta up">↑ 4 vs média</div>
       </div>
-      <div class="score-card">
-        <div class="score-donut">
-          <svg viewBox="0 0 100 100">
-            <circle class="bg-ring" cx="50" cy="50" r="44"/>
-            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#c4b5fd"
-              stroke-dasharray="276.46" stroke-dashoffset="91.2"/>
-          </svg>
-          <div class="label"><div class="num">67</div><div class="max">/ 100</div></div>
+
+      <div class="pillars-row">
+        <div class="pillar">
+          <div class="name">Energia</div>
+          <div class="bar"><div style="width:46%;background:var(--energia)"></div></div>
+          <div class="v">2.3<small>/5</small></div>
         </div>
-        <div class="name">Sono</div>
-        <div class="delta down">↓ 8 vs média</div>
-      </div>
-      <div class="score-card">
-        <div class="score-donut">
-          <svg viewBox="0 0 100 100">
-            <circle class="bg-ring" cx="50" cy="50" r="44"/>
-            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#fbbf24"
-              stroke-dasharray="276.46" stroke-dashoffset="138.2"/>
-          </svg>
-          <div class="label"><div class="num">50</div><div class="max">/ 100</div></div>
+        <div class="pillar">
+          <div class="name">Clareza</div>
+          <div class="bar"><div style="width:46%;background:var(--clareza)"></div></div>
+          <div class="v">2.3<small>/5</small></div>
         </div>
-        <div class="name">Atividade</div>
-        <div class="delta">— meta 8k</div>
+        <div class="pillar">
+          <div class="name">Estabilidade</div>
+          <div class="bar"><div style="width:37%;background:var(--estabilidade)"></div></div>
+          <div class="v">1.8<small>/5</small></div>
+        </div>
       </div>
     </div>
 
-    <section>
-      <div class="section-head">
-        <h2>Destaques de hoje</h2>
-      </div>
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-            Frequência cardíaca
+    <section style="margin-top:20px;">
+      <div class="section-head"><h2>Hoje</h2></div>
+      <div class="score-row">
+        <div class="score-card">
+          <div class="donut-sm">
+            <svg viewBox="0 0 100 100">
+              <circle class="bg-ring" cx="50" cy="50" r="44"/>
+              <circle class="fg-ring" cx="50" cy="50" r="44" stroke="var(--good)"
+                stroke-dasharray="276.46" stroke-dashoffset="63.6"/>
+            </svg>
+            <div class="label"><div class="num">77</div><div class="max">/ 100</div></div>
           </div>
-          <div class="card-sub"><span class="ok">●</span> normal</div>
+          <div class="name">Readiness</div>
+          <div class="delta up">↑ 4 vs base</div>
         </div>
-        <div class="card-value">
-          <span class="big">87</span><span class="unit">bpm média</span>
+        <div class="score-card">
+          <div class="donut-sm">
+            <svg viewBox="0 0 100 100">
+              <circle class="bg-ring" cx="50" cy="50" r="44"/>
+              <circle class="fg-ring" cx="50" cy="50" r="44" stroke="var(--sleep-light)"
+                stroke-dasharray="276.46" stroke-dashoffset="91.2"/>
+            </svg>
+            <div class="label"><div class="num">67</div><div class="max">/ 100</div></div>
+          </div>
+          <div class="name">Sono</div>
+          <div class="delta down">↓ 8 vs base</div>
         </div>
-        <div class="card-sub">Repouso 53 · Pico 126 · 1.587 leituras hoje</div>
-        <div class="trend">
-          <svg viewBox="0 0 280 64" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="hrGrad" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0" stop-color="#f472b6" stop-opacity="0.5"/>
-                <stop offset="1" stop-color="#f472b6" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <path class="area" fill="url(#hrGrad)"
-              d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32 L280,64 L0,64 Z"/>
-            <path class="line" stroke="#f472b6"
-              d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32"/>
-          </svg>
+        <div class="score-card">
+          <div class="donut-sm">
+            <svg viewBox="0 0 100 100">
+              <circle class="bg-ring" cx="50" cy="50" r="44"/>
+              <circle class="fg-ring" cx="50" cy="50" r="44" stroke="var(--steps)"
+                stroke-dasharray="276.46" stroke-dashoffset="138.2"/>
+            </svg>
+            <div class="label"><div class="num">50</div><div class="max">/ 100</div></div>
+          </div>
+          <div class="name">Atividade</div>
+          <div class="delta">— meta 8k</div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title">
-            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            Sono última noite
-          </div>
-          <div class="card-sub">6h 24m</div>
-        </div>
-        <div class="card-value">
-          <span class="big">77</span><span class="unit">% eficiência</span>
-        </div>
-        <div class="card-sub">Profundo 91min · Leve 292min · Acordado 3min</div>
-        <div class="sleep-stages">
-          <div style="background:var(--sleep-light); flex: 4"></div>
-          <div style="background:var(--sleep-deep); flex: 2"></div>
-          <div style="background:var(--sleep-light); flex: 3"></div>
-          <div style="background:var(--sleep-deep); flex: 2"></div>
-          <div style="background:var(--sleep-light); flex: 5"></div>
-          <div style="background:var(--sleep-awake); flex: 0.3"></div>
-          <div style="background:var(--sleep-light); flex: 2"></div>
-        </div>
+      <div class="formula-box">
+        <div class="h">Pesos da Literatura</div>
+        <div class="row"><span>Sleep</span><code>30% dur · 25% efic · 20% deep · 15% REM · 10% cont</code></div>
+        <div class="row"><span>Readiness</span><code>30% HRV · 25% sono · 20% RHR · 15% recup · 10% temp</code></div>
+        <div class="row"><span>Activity</span><code>30% steps · 25% min ativos · 20% cal · 15% reg · 10% sed</code></div>
       </div>
     </section>
   </div>
 
-  <!-- ===========================================================
-       TAB: VITALS  (cards individuais por biomarcador)
-  ============================================================ -->
+  <!-- =============== VITAIS (sub-menu por biomarcador) =============== -->
   <div class="tab-panel" data-tab="vitals">
     <div class="greeting">
       <div class="date">Sinais vitais</div>
       <h1>Seus <em>biomarcadores</em></h1>
     </div>
 
+    <div class="subtabs" id="vitalsSubtabs">
+      <button class="subtab active" data-sub="hr">FC</button>
+      <button class="subtab" data-sub="hrv">HRV</button>
+      <button class="subtab" data-sub="sleep">Sono</button>
+      <button class="subtab" data-sub="spo2">SpO₂</button>
+      <button class="subtab" data-sub="temp">Temp</button>
+      <button class="subtab" data-sub="steps">Passos</button>
+      <button class="subtab" data-sub="stress">Stress</button>
+      <button class="subtab" data-sub="battery">Bateria</button>
+    </div>
+
     <!-- HR -->
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#f472b6" stroke-width="1.6"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          Frequência cardíaca
+    <div class="subpanel active" data-sub="hr">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--hr)" stroke-width="1.6"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            FC · 24h
+          </div>
+          <div class="card-sub"><span class="ok">normal</span></div>
         </div>
-        <div class="card-sub"><span class="ok">normal</span></div>
+        <div class="card-value"><span class="big">87</span><span class="unit">bpm média</span></div>
+        <div class="card-sub">Repouso 53 · Pico 126 · 1.587 leituras hoje</div>
+        <div class="trend">
+          <svg viewBox="0 0 280 64" preserveAspectRatio="none">
+            <defs><linearGradient id="hrGrad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="hsl(340 70% 70%)" stop-opacity=".5"/><stop offset="1" stop-color="hsl(340 70% 70%)" stop-opacity="0"/></linearGradient></defs>
+            <path class="area" fill="url(#hrGrad)" d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32 L280,64 L0,64 Z"/>
+            <path class="line" stroke="hsl(340 70% 70%)" d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32"/>
+          </svg>
+        </div>
+        <div class="range-bar"><div class="baseline" style="left:35%;right:45%;"></div><div class="marker" style="left:47%;"></div></div>
+        <div class="range-labels"><span>40</span><span>baseline 60–80</span><span>180</span></div>
       </div>
-      <div class="card-value">
-        <span class="big">87</span><span class="unit">bpm · média 7d</span>
-      </div>
-      <div class="card-sub">Repouso médio 65 · Variação dia 53 – 126</div>
-      <div class="range-bar">
-        <div class="baseline" style="left: 35%; right: 45%;"></div>
-        <div class="marker" style="left: 47%;"></div>
-      </div>
-      <div class="range-labels"><span>40</span><span>baseline 60–80</span><span>180</span></div>
-      <div class="trend">
-        <svg viewBox="0 0 280 64" preserveAspectRatio="none">
-          <defs><linearGradient id="hrGrad2" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f472b6" stop-opacity="0.4"/><stop offset="1" stop-color="#f472b6" stop-opacity="0"/></linearGradient></defs>
-          <path class="area" fill="url(#hrGrad2)" d="M0,32 L40,28 L80,35 L120,22 L160,18 L200,30 L240,25 L280,28 L280,64 L0,64 Z"/>
-          <path class="line" stroke="#f472b6" d="M0,32 L40,28 L80,35 L120,22 L160,18 L200,30 L240,25 L280,28"/>
-        </svg>
+      <div class="card">
+        <div class="card-head"><div class="card-title">Tendência 7 dias</div><div class="card-sub">média diária</div></div>
+        <div class="weekly" id="hrWeekly7"></div>
+        <div style="margin-top:24px;font-size:10px;color:var(--text-muted);"></div>
       </div>
     </div>
 
     <!-- HRV -->
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          Variabilidade cardíaca (RMSSD)
+    <div class="subpanel" data-sub="hrv">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--hrv)" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            HRV (RMSSD)
+          </div>
+          <div class="card-sub"><span class="warn">tuning</span></div>
         </div>
-        <div class="card-sub"><span class="warn">tuning</span></div>
+        <div class="card-value"><span class="big">42</span><span class="unit">ms · estimado PPG</span></div>
+        <div class="card-sub">2 medições nos últimos 14 dias · ideal 30–80ms (idade 40s)</div>
+        <div class="range-bar"><div class="baseline" style="left:30%;right:40%;"></div><div class="marker" style="left:42%;"></div></div>
+        <div class="range-labels"><span>0</span><span>baseline 30–80</span><span>120</span></div>
+        <div class="note">Algoritmo de peak detection ainda em ajuste fino (parser v4 deployado). Valores definitivos em algumas medições.</div>
       </div>
-      <div class="card-value">
-        <span class="big">42</span><span class="unit">ms · estimado PPG</span>
-      </div>
-      <div class="card-sub">2 medições nos últimos 14 dias · ideal 30–80ms</div>
-      <div class="range-bar">
-        <div class="baseline" style="left: 30%; right: 40%;"></div>
-        <div class="marker" style="left: 42%;"></div>
-      </div>
-      <div class="range-labels"><span>0</span><span>baseline 30–80</span><span>120</span></div>
-      <div class="note">Algoritmo de peak detection ainda em ajuste fino. Próximas medições com mais precisão.</div>
-    </div>
-
-    <!-- Sleep card detalhado -->
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          Sono · 12 noites
+      <div class="card">
+        <div class="card-head"><div class="card-title">RR intervals</div><div class="card-sub">últimas detectados</div></div>
+        <div class="trend">
+          <svg viewBox="0 0 280 64" preserveAspectRatio="none">
+            <path class="line" stroke="hsl(265 65% 75%)" d="M0,30 L20,25 L40,40 L60,35 L80,28 L100,42 L120,38 L140,30 L160,45 L180,32 L200,28 L220,38 L240,30 L260,35 L280,30"/>
+          </svg>
         </div>
-        <div class="card-sub">média 5h 32m</div>
-      </div>
-      <div class="card-value">
-        <span class="big">6:24</span><span class="unit">h última noite</span>
-      </div>
-      <div class="sleep-stages">
-        <div style="background:var(--sleep-light); flex: 4.86"></div>
-        <div style="background:var(--sleep-deep); flex: 1.51"></div>
-        <div style="background:var(--sleep-light); flex: 0.05"></div>
-      </div>
-      <div class="legend">
-        <div class="legend-item"><div class="swatch" style="background:var(--sleep-deep)"></div>Profundo</div>
-        <div class="legend-item"><div class="swatch" style="background:var(--sleep-light)"></div>Leve</div>
-        <div class="legend-item"><div class="swatch" style="background:var(--sleep-rem)"></div>REM</div>
-        <div class="legend-item"><div class="swatch" style="background:var(--sleep-awake)"></div>Acordado</div>
-      </div>
-      <div class="stage-stats">
-        <div class="stage-stat"><div class="v">91</div><div class="l">Profundo</div></div>
-        <div class="stage-stat"><div class="v">292</div><div class="l">Leve</div></div>
-        <div class="stage-stat"><div class="v">0</div><div class="l">REM</div></div>
-        <div class="stage-stat"><div class="v">3</div><div class="l">Acordado</div></div>
       </div>
     </div>
 
-    <!-- Atividade -->
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">
-          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          Atividade
+    <!-- SLEEP detalhado REM/Light/Deep -->
+    <div class="subpanel" data-sub="sleep">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--sleep-light)" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Última noite · 30/04
+          </div>
+          <div class="card-sub">eficiência 99%</div>
         </div>
-        <div class="card-sub">meta 8.000</div>
+        <div class="card-value"><span class="big">6:26</span><span class="unit">h totais</span></div>
+        <div class="sleep-stages" id="lastNightStages"></div>
+        <div class="legend">
+          <div class="legend-item"><div class="swatch" style="background:var(--sleep-deep)"></div>Profundo</div>
+          <div class="legend-item"><div class="swatch" style="background:var(--sleep-light)"></div>Leve</div>
+          <div class="legend-item"><div class="swatch" style="background:var(--sleep-rem)"></div>REM</div>
+          <div class="legend-item"><div class="swatch" style="background:var(--sleep-awake)"></div>Acordado</div>
+        </div>
+        <div class="stage-stats">
+          <div class="stage-stat"><div class="v">1:31<small>h</small></div><div class="l">Profundo</div></div>
+          <div class="stage-stat"><div class="v">4:52<small>h</small></div><div class="l">Leve</div></div>
+          <div class="stage-stat"><div class="v">0:00<small>h</small></div><div class="l">REM*</div></div>
+          <div class="stage-stat"><div class="v">0:03<small>h</small></div><div class="l">Acordado</div></div>
+        </div>
+        <div class="note">* REM ainda não distinguido pelo firmware do anel JStyle X5. Trabalho em progresso.</div>
       </div>
-      <div class="card-value">
-        <span class="big">1.519</span><span class="unit">passos hoje</span>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">Histórico · 12 noites</div><div class="card-sub">horas/noite</div></div>
+        <div class="weekly" id="sleepWeekly"></div>
+        <div style="margin-top:24px;font-size:10px;color:var(--text-muted);display:flex;justify-content:space-between;"><span>16/abr</span><span>30/abr</span></div>
       </div>
-      <div class="range-bar">
-        <div class="baseline" style="left: 0%; right: 81%;"></div>
-        <div class="marker" style="left: 19%;"></div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">% Sono profundo por noite</div><div class="card-sub">ideal 13–23%</div></div>
+        <div class="weekly" id="deepWeekly"></div>
+        <div style="margin-top:24px;font-size:10px;color:var(--text-muted);"></div>
       </div>
-      <div class="range-labels"><span>0</span><span>meta 8k</span><span>15k</span></div>
-      <div class="card-sub" style="margin-top: 10px;">Última atividade registrada: 27/04 · 1.519 passos</div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">Score de sono · cálculo</div></div>
+        <div class="formula-box" style="margin-top:0">
+          <div class="row"><span>Duração (vs 7-9h)</span><code>30%</code></div>
+          <div class="row"><span>Eficiência</span><code>25%</code></div>
+          <div class="row"><span>% Profundo (13-23%)</span><code>20%</code></div>
+          <div class="row"><span>% REM (20-25%)</span><code>15%</code></div>
+          <div class="row"><span>Continuidade</span><code>10%</code></div>
+        </div>
+      </div>
     </div>
 
-    <!-- Mini grid: Battery / SpO2 / Temp / Stress -->
-    <div class="kpi-grid" style="margin-top: 16px;">
-      <div class="kpi">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="1.6"><rect x="2" y="6" width="18" height="12" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
-        <div class="lbl">Bateria anel</div>
-        <div class="val">68%</div>
-        <div class="sub">JStyle X5 · agora</div>
+    <!-- SpO2 -->
+    <div class="subpanel" data-sub="spo2">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--spo2)" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+            SpO₂ (oxigenação)
+          </div>
+          <div class="card-sub"><span class="warn">aguardando</span></div>
+        </div>
+        <div class="card-value"><span class="big">—</span><span class="unit">% sangue arterial</span></div>
+        <div class="card-sub">Cmd 0x57 configurado · próxima medição auto a cada 30min</div>
+        <div class="note">O anel já está configurado para coletar SpO2 a cada 30min. Os primeiros dados aparecem após algumas horas de uso contínuo.</div>
       </div>
-      <div class="kpi">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
-        <div class="lbl">SpO₂</div>
-        <div class="val">—</div>
-        <div class="sub">aguardando coleta</div>
+    </div>
+
+    <!-- Temp -->
+    <div class="subpanel" data-sub="temp">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--temp)" stroke-width="1.6"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+            Temperatura corporal
+          </div>
+          <div class="card-sub"><span class="warn">aguardando</span></div>
+        </div>
+        <div class="card-value"><span class="big">—</span><span class="unit">°C desvio do baseline</span></div>
+        <div class="card-sub">Cmd 0x62 configurado · auto-monitoring a cada 30min</div>
       </div>
-      <div class="kpi">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="1.6"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
-        <div class="lbl">Temperatura</div>
-        <div class="val">—</div>
-        <div class="sub">aguardando coleta</div>
+    </div>
+
+    <!-- Steps -->
+    <div class="subpanel" data-sub="steps">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--steps)" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Passos hoje
+          </div>
+          <div class="card-sub">meta 8.000</div>
+        </div>
+        <div class="card-value"><span class="big">1.519</span><span class="unit">passos</span></div>
+        <div class="range-bar"><div class="baseline" style="left:0%;right:81%;"></div><div class="marker" style="left:19%;"></div></div>
+        <div class="range-labels"><span>0</span><span>meta 8k</span><span>15k</span></div>
+        <div class="card-sub" style="margin-top:10px;">Última atividade registrada: 27/04 · 1.519 passos</div>
       </div>
-      <div class="kpi">
-        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-        <div class="lbl">Estresse</div>
-        <div class="val">—</div>
-        <div class="sub">aguardando coleta</div>
+    </div>
+
+    <!-- Stress -->
+    <div class="subpanel" data-sub="stress">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--hrv)" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+            Estresse
+          </div>
+          <div class="card-sub"><span class="warn">aguardando</span></div>
+        </div>
+        <div class="card-value"><span class="big">—</span><span class="unit">/ 100 (HRV-derived)</span></div>
+        <div class="card-sub">Cmd 0x56 (HRV+stress) já configurado · acumular 30min+ uso</div>
+      </div>
+    </div>
+
+    <!-- Battery -->
+    <div class="subpanel" data-sub="battery">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--battery)" stroke-width="1.6"><rect x="2" y="6" width="18" height="12" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
+            Bateria do anel
+          </div>
+          <div class="card-sub">JStyle X5</div>
+        </div>
+        <div class="card-value"><span class="big">68</span><span class="unit">%</span></div>
+        <div class="card-sub">Última leitura · 09/05 16:06</div>
+        <div class="range-bar"><div class="baseline" style="left:60%;right:0;background:var(--good);"></div><div class="marker" style="left:68%;"></div></div>
+        <div class="range-labels"><span>0%</span><span>50%</span><span>100%</span></div>
       </div>
     </div>
   </div>
 
-  <!-- ===========================================================
-       TAB: TRENDS / Insights (gráficos longos)
-  ============================================================ -->
+  <!-- =============== TENDÊNCIAS =============== -->
   <div class="tab-panel" data-tab="trends">
     <div class="greeting">
-      <div class="date">Tendências</div>
+      <div class="date">Tendências · 14 dias</div>
       <h1>Sua <em>história</em></h1>
     </div>
 
     <div class="card">
-      <div class="card-head">
-        <div class="card-title">Sono · últimas 2 semanas</div>
-        <div class="card-sub">total/noite (h)</div>
-      </div>
-      <div class="weekly" id="sleepWeekly"></div>
-      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
-        <span>16/abr</span><span>30/abr</span>
-      </div>
+      <div class="card-head"><div class="card-title">VYR State</div><div class="card-sub">10 dias</div></div>
+      <div class="weekly" id="vyrTrend"></div>
+      <div style="margin-top:24px;font-size:10px;color:var(--text-muted);"></div>
     </div>
 
     <div class="card">
-      <div class="card-head">
-        <div class="card-title">FC média diária</div>
-        <div class="card-sub">bpm</div>
-      </div>
-      <div class="weekly" id="hrWeekly"></div>
-      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
-        <span>29/abr</span><span>01/mai</span>
-      </div>
+      <div class="card-head"><div class="card-title">Sono total</div><div class="card-sub">horas/noite</div></div>
+      <div class="weekly" id="sleepTrend"></div>
     </div>
 
     <div class="card">
-      <div class="card-head">
-        <div class="card-title">Sono profundo (% por noite)</div>
-        <div class="card-sub">ideal &gt; 15%</div>
-      </div>
-      <div class="weekly" id="deepWeekly"></div>
-      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
-        <span>16/abr</span><span>30/abr</span>
-      </div>
+      <div class="card-head"><div class="card-title">FC média diária</div><div class="card-sub">bpm</div></div>
+      <div class="weekly" id="hrTrend"></div>
     </div>
+
+    <button class="report-cta" onclick="document.getElementById('weekly').classList.add('open')" style="margin-top:14px;">
+      Abrir Relatório Semanal
+    </button>
   </div>
 
-  <!-- ===========================================================
-       TAB: HOME (placeholder — link pra app real)
-  ============================================================ -->
-  <div class="tab-panel" data-tab="home">
-    <div class="greeting"><div class="date">Início</div><h1>Início do app</h1></div>
-    <div class="card"><div class="card-sub">Tela home do VYR (já existente)</div></div>
-  </div>
-
+  <!-- =============== HOME duplicada removida; PERFIL =============== -->
   <div class="tab-panel" data-tab="profile">
     <div class="greeting"><div class="date">Perfil</div><h1>Diego</h1></div>
-    <div class="card"><div class="card-sub">Configurações, anel, integrações</div></div>
+    <div class="card"><div class="card-sub">Configurações · Anel · Integrações · Privacidade</div></div>
   </div>
 
 </main>
 
-<!-- ===== bottom nav ===== -->
+<!-- =============== Weekly Summary Modal =============== -->
+<div class="modal-overlay" id="weekly">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.12em;">Relatório semanal</div>
+        <div style="font-family:var(--serif);font-size:20px;margin-top:2px;">28/04 — 04/05</div>
+      </div>
+      <button class="close" onclick="document.getElementById('weekly').classList.remove('open')">×</button>
+    </div>
+
+    <div class="report-section">
+      <h3>Sumário</h3>
+      <div class="desc">Sua semana em números — comparação com seu próprio baseline (médias 30d).</div>
+      <div class="report-stat"><span class="l">VYR State médio</span><span class="v">41 / 100</span></div>
+      <div class="report-stat"><span class="l">Fase predominante</span><span class="v">CLEAR</span></div>
+      <div class="report-stat"><span class="l">Sono médio</span><span class="v">5h 12m</span></div>
+      <div class="report-stat"><span class="l">FC média</span><span class="v">87 bpm</span></div>
+      <div class="report-stat"><span class="l">Passos médio/dia</span><span class="v">1.519</span></div>
+      <div class="report-stat"><span class="l">Bateria início → fim</span><span class="v">98% → 68%</span></div>
+    </div>
+
+    <div class="report-section">
+      <h3>Sono</h3>
+      <div class="desc">Distribuição dos estágios na semana (12 noites de dados).</div>
+      <div class="report-stat"><span class="l">Total acumulado</span><span class="v">62h 17m</span></div>
+      <div class="report-stat"><span class="l">Profundo</span><span class="v">10h 44m · 17%</span></div>
+      <div class="report-stat"><span class="l">Leve</span><span class="v">49h 50m · 80%</span></div>
+      <div class="report-stat"><span class="l">REM</span><span class="v">— *</span></div>
+      <div class="report-stat"><span class="l">Acordado</span><span class="v">1h 41m · 3%</span></div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:10px;">* Firmware JStyle X5 não distingue REM ainda. Esperando próxima versão de firmware.</div>
+    </div>
+
+    <div class="report-section">
+      <h3>Insights</h3>
+      <div class="card" style="margin:0">
+        <div class="card-sub" style="font-size:13px;color:var(--text);">
+          ▸ Noite mais reparadora: <strong>19/abr</strong> (11h 13m, 127min profundo)<br>
+          ▸ FC mais elevada: <strong>30/abr 18:40</strong> (126 bpm)<br>
+          ▸ Eficiência média: <strong>97%</strong> (tempo dormindo / tempo na cama)<br>
+          ▸ Variabilidade: alta — sono entre 1h 25m e 11h 13m por noite
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section">
+      <h3>Recomendações</h3>
+      <div class="card" style="margin:0">
+        <div class="card-sub" style="font-size:13px;color:var(--text);line-height:1.7;">
+          ▸ <strong>Consistência de sono</strong> — sua média (5h 12m) está abaixo do recomendado (7-9h). Tente ir pra cama no mesmo horário ±30min.<br>
+          ▸ <strong>Atividade leve</strong> — meta de 8k passos. Caminhar 30min após almoço pode levar você lá.<br>
+          ▸ <strong>HRV baseline</strong> — com mais dados (3-7 dias contínuos), seu RMSSD baseline será calibrado e o Readiness ficará mais preciso.
+        </div>
+      </div>
+    </div>
+
+    <button class="report-cta" onclick="window.print()">📄 Salvar PDF / Imprimir</button>
+    <button class="report-cta" style="background:var(--card);color:var(--text);border:1px solid var(--card-border);margin-top:8px;">Compartilhar com profissional de saúde</button>
+  </div>
+</div>
+
+<!-- =============== bottom nav =============== -->
 <nav class="bottom-nav">
   <div class="bottom-nav-inner">
-    <button class="nav-tab" data-target="home">
+    <button class="nav-tab active" data-target="home">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       <span class="lbl">Home</span>
-    </button>
-    <button class="nav-tab active" data-target="today">
-      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span class="lbl">Hoje</span>
     </button>
     <button class="nav-tab" data-target="vitals">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -520,56 +614,88 @@ section { margin-bottom: 28px; }
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       <span class="lbl">Perfil</span>
     </button>
+    <button class="nav-tab" data-target="report" id="reportNav">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      <span class="lbl">Relatório</span>
+    </button>
   </div>
 </nav>
 
 <script>
-// ===== Real Diego data (pulled from Supabase 2026-05-09) =====
+// ===== Real Diego data (Supabase 2026-05-09) =====
 const sleepNights = [
-  {d:'16/04', h:3.8, deep:25}, {d:'17/04', h:6.6, deep:51}, {d:'18/04', h:1.7, deep:21},
-  {d:'19/04', h:11.2, deep:127}, {d:'20/04', h:4.8, deep:52}, {d:'21/04', h:1.4, deep:2},
-  {d:'22/04', h:6.6, deep:88}, {d:'23/04', h:3.2, deep:30}, {d:'24/04', h:4.6, deep:51},
-  {d:'28/04', h:1.9, deep:24}, {d:'29/04', h:6.4, deep:62}, {d:'30/04', h:6.4, deep:91},
+  {d:'16/04', deep:25, light:192, rem:0, awake:9, total:226},
+  {d:'17/04', deep:51, light:342, rem:0, awake:5, total:398},
+  {d:'18/04', deep:21, light:74, rem:0, awake:8, total:103},
+  {d:'19/04', deep:127, light:529, rem:0, awake:17, total:673},
+  {d:'20/04', deep:52, light:227, rem:0, awake:10, total:289},
+  {d:'21/04', deep:2, light:78, rem:0, awake:5, total:85},
+  {d:'22/04', deep:88, light:305, rem:0, awake:5, total:398},
+  {d:'23/04', deep:30, light:157, rem:0, awake:7, total:194},
+  {d:'24/04', deep:51, light:215, rem:0, awake:10, total:276},
+  {d:'28/04', deep:24, light:84, rem:0, awake:4, total:112},
+  {d:'29/04', deep:62, light:305, rem:0, awake:18, total:385},
+  {d:'30/04', deep:91, light:292, rem:0, awake:3, total:386},
 ];
-const hrDaily = [
-  {d:'29/04', avg:86, n:1060}, {d:'30/04', avg:87, n:1587}, {d:'01/05', avg:89, n:767},
+const hrDaily = [{d:'29/04', avg:86}, {d:'30/04', avg:87}, {d:'01/05', avg:89}, {d:'06/05', avg:104}];
+const vyrDaily = [
+  {d:'28/04', s:39}, {d:'29/04', s:39}, {d:'01/05', s:40}, {d:'02/05', s:41},
+  {d:'03/05', s:41}, {d:'04/05', s:41}, {d:'05/05', s:41}, {d:'06/05', s:41},
+  {d:'07/05', s:42}, {d:'09/05', s:42},
 ];
 
-// Build sleep weekly bars
-const sw = document.getElementById('sleepWeekly');
-const maxH = Math.max(...sleepNights.map(n => n.h));
-sw.innerHTML = sleepNights.map(n => {
-  const pct = Math.round(n.h / maxH * 100);
-  const color = n.h >= 7 ? 'var(--good)' : n.h >= 5 ? 'var(--warn)' : 'var(--bad)';
-  return `<div class="bar" style="height:${pct}%;background:linear-gradient(180deg, ${color}, transparent);"><span class="lbl">${n.h}</span></div>`;
-}).join('');
+// Last night (30/04) sleep stages
+(function(){
+  const el = document.getElementById('lastNightStages');
+  if(!el) return;
+  const last = sleepNights[sleepNights.length-1];
+  el.innerHTML = `
+    <div style="background:var(--sleep-light);flex:${last.light}"></div>
+    <div style="background:var(--sleep-deep);flex:${last.deep}"></div>
+    <div style="background:var(--sleep-awake);flex:${last.awake}"></div>
+  `;
+})();
 
-// Build HR daily bars
-const hw = document.getElementById('hrWeekly');
-const maxHR = Math.max(...hrDaily.map(d => d.avg));
-hw.innerHTML = hrDaily.map(d => {
-  const pct = Math.round(d.avg / maxHR * 100);
-  return `<div class="bar" style="height:${pct}%;background:linear-gradient(180deg, var(--hr), transparent);"><span class="lbl">${d.avg}</span></div>`;
-}).join('');
+function bars(elId, data, getH, getLbl, getColor, max) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (max === undefined) max = Math.max(...data.map(getH));
+  el.innerHTML = data.map(d => {
+    const h = getH(d);
+    const pct = Math.max(2, Math.round(h / max * 100));
+    return `<div class="bar" style="height:${pct}%;background:linear-gradient(180deg, ${getColor(d)}, transparent);"><span class="vlbl">${getLbl(d)}</span><span class="lbl">${d.d.slice(0,2)}</span></div>`;
+  }).join('');
+}
 
-// Build deep sleep % bars
-const dw = document.getElementById('deepWeekly');
-dw.innerHTML = sleepNights.map(n => {
-  const pct = n.h > 0 ? (n.deep / (n.h * 60)) * 100 : 0;
-  const ok = pct >= 15;
-  const heightPct = Math.min(100, pct * 3);
-  const color = ok ? 'var(--good)' : 'var(--warn)';
-  return `<div class="bar" style="height:${heightPct}%;background:linear-gradient(180deg, ${color}, transparent);"><span class="lbl">${Math.round(pct)}%</span></div>`;
-}).join('');
+bars('sleepWeekly', sleepNights, n => n.total/60, n => (n.total/60).toFixed(1), n => n.total/60 >= 7 ? 'var(--good)' : n.total/60 >= 5 ? 'var(--warn)' : 'var(--bad)');
+bars('deepWeekly', sleepNights, n => n.total > 0 ? n.deep/n.total*100 : 0, n => n.total > 0 ? Math.round(n.deep/n.total*100) + '%' : '0', n => (n.deep/Math.max(1,n.total)) >= 0.13 ? 'var(--good)' : 'var(--warn)', 30);
+bars('hrWeekly7', hrDaily, d => d.avg, d => d.avg, () => 'var(--hr)');
+bars('vyrTrend', vyrDaily, d => d.s, d => d.s, d => d.s >= 60 ? 'var(--good)' : d.s >= 40 ? 'var(--warn)' : 'var(--bad)', 100);
+bars('sleepTrend', sleepNights, n => n.total/60, n => (n.total/60).toFixed(1), n => 'var(--sleep-light)');
+bars('hrTrend', hrDaily, d => d.avg, d => d.avg, () => 'var(--hr)');
 
 // Tab switcher
 document.querySelectorAll('.nav-tab').forEach(tab => {
   tab.addEventListener('click', () => {
+    if (tab.id === 'reportNav') {
+      document.getElementById('weekly').classList.add('open');
+      return;
+    }
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.querySelector(`.tab-panel[data-tab="${tab.dataset.target}"]`).classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+// Sub-tabs Vitais
+document.querySelectorAll('#vitalsSubtabs .subtab').forEach(st => {
+  st.addEventListener('click', () => {
+    document.querySelectorAll('#vitalsSubtabs .subtab').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.subpanel').forEach(p => p.classList.remove('active'));
+    st.classList.add('active');
+    document.querySelector(`.subpanel[data-sub="${st.dataset.sub}"]`).classList.add('active');
   });
 });
 </script>
