@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>VYR · Insights · mockup v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14;
+  --bg-elev: #11161e;
+  --card: #131820;
+  --card-border: #1c2330;
+  --text: #e8eaed;
+  --text-dim: #9ca3af;
+  --text-muted: #6b7280;
+  --accent: #d4d4d8;
+  --good: #6ee7b7;
+  --good-soft: #064e3b;
+  --warn: #fcd34d;
+  --warn-soft: #78350f;
+  --bad: #fca5a5;
+  --bad-soft: #7f1d1d;
+  --hr: #f472b6;
+  --hrv: #c4b5fd;
+  --sleep-deep: #4338ca;
+  --sleep-light: #818cf8;
+  --sleep-rem: #c4b5fd;
+  --sleep-awake: #fca5a5;
+  --steps: #fbbf24;
+  --temp: #fb923c;
+  --spo2: #67e8f9;
+  --battery: #86efac;
+  --serif: 'Cormorant Garamond', Georgia, serif;
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+html, body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+body { min-height: 100vh; padding-bottom: 90px; max-width: 480px; margin: 0 auto; }
+.app-shell { padding: 0 16px; }
+
+/* ===== top bar ===== */
+.top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 16px 12px; position: sticky; top: 0;
+  background: linear-gradient(180deg, var(--bg) 70%, transparent);
+  z-index: 10;
+}
+.top-bar .brand { font-family: var(--serif); font-size: 22px; font-weight: 500; letter-spacing: 0.02em; }
+.top-bar .device-pill {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-dim);
+  background: var(--card); border: 1px solid var(--card-border);
+  padding: 6px 10px; border-radius: 99px;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); box-shadow: 0 0 8px var(--good); }
+
+/* ===== greeting ===== */
+.greeting { padding: 8px 0 18px; }
+.greeting .date { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px; }
+.greeting h1 { font-family: var(--serif); font-size: 28px; font-weight: 400; line-height: 1.15; }
+.greeting h1 em { font-style: italic; color: var(--text-dim); }
+
+/* ===== score row ===== */
+.score-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+.score-card {
+  background: var(--card); border: 1px solid var(--card-border); border-radius: 18px;
+  padding: 14px 10px 12px; text-align: center;
+}
+.score-donut { position: relative; width: 78px; height: 78px; margin: 0 auto 8px; }
+.score-donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.score-donut .bg-ring { fill: none; stroke: var(--card-border); stroke-width: 5; }
+.score-donut .fg-ring { fill: none; stroke-width: 5; stroke-linecap: round; transition: stroke-dashoffset 0.6s; }
+.score-donut .label {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.score-donut .label .num { font-family: var(--serif); font-size: 28px; font-weight: 500; line-height: 1; }
+.score-donut .label .max { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+.score-card .name { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; }
+.score-card .delta { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.score-card .delta.up { color: var(--good); }
+.score-card .delta.down { color: var(--bad); }
+
+/* ===== section ===== */
+section { margin-bottom: 28px; }
+.section-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.section-head h2 { font-family: var(--serif); font-size: 18px; font-weight: 500; letter-spacing: 0.01em; }
+.section-head .more { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; }
+
+/* ===== generic card ===== */
+.card {
+  background: var(--card); border: 1px solid var(--card-border); border-radius: 16px;
+  padding: 16px; margin-bottom: 10px;
+}
+.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.card-title { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.card-title .ic { width: 16px; height: 16px; opacity: 0.8; }
+.card-value { display: flex; align-items: baseline; gap: 6px; }
+.card-value .big { font-family: var(--serif); font-size: 36px; font-weight: 500; line-height: 1; }
+.card-value .unit { font-size: 12px; color: var(--text-muted); }
+.card-sub { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.card-sub .ok { color: var(--good); }
+.card-sub .warn { color: var(--warn); }
+.card-sub .bad { color: var(--bad); }
+
+/* baseline range bar */
+.range-bar {
+  position: relative; height: 6px; background: var(--card-border); border-radius: 3px; margin-top: 14px;
+}
+.range-bar .baseline { position: absolute; top: 0; bottom: 0; background: var(--text-muted); opacity: 0.35; border-radius: 3px; }
+.range-bar .marker {
+  position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text); border: 2px solid var(--card); transform: translateX(-50%);
+  box-shadow: 0 0 0 2px var(--text);
+}
+.range-labels { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10px; color: var(--text-muted); }
+
+/* ===== sleep stages bar ===== */
+.sleep-stages {
+  display: flex; height: 36px; border-radius: 4px; overflow: hidden; margin-top: 12px;
+}
+.sleep-stages > div { display: flex; align-items: flex-end; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+.legend-item .swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+.stage-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 16px; }
+.stage-stat { text-align: center; padding: 8px 0; border-top: 1px solid var(--card-border); }
+.stage-stat .v { font-family: var(--serif); font-size: 16px; font-weight: 500; }
+.stage-stat .l { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 2px; }
+
+/* ===== HR trend mini chart ===== */
+.trend {
+  width: 100%; height: 64px; margin-top: 12px;
+}
+.trend svg { width: 100%; height: 100%; }
+.trend .line { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.trend .area { opacity: 0.18; }
+.trend .axis-label { fill: var(--text-muted); font-size: 9px; }
+
+/* ===== weekly bars (insights tab) ===== */
+.weekly { display: flex; gap: 6px; align-items: flex-end; height: 90px; margin-top: 10px; }
+.weekly .bar {
+  flex: 1; border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, var(--text-dim), var(--card-border));
+  position: relative; min-height: 2px;
+}
+.weekly .bar .lbl { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; color: var(--text-muted); }
+
+/* ===== Battery + small KPI ===== */
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kpi {
+  background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;
+}
+.kpi .ic { width: 18px; height: 18px; opacity: 0.7; margin-bottom: 8px; }
+.kpi .lbl { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.kpi .val { font-family: var(--serif); font-size: 24px; font-weight: 500; margin-top: 4px; }
+.kpi .sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+/* ===== bottom nav ===== */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(10, 14, 20, 0.95); backdrop-filter: blur(20px);
+  border-top: 1px solid var(--card-border);
+  padding: 10px 0 calc(env(safe-area-inset-bottom) + 8px); z-index: 100;
+}
+.bottom-nav-inner { max-width: 480px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.nav-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 4px; cursor: pointer; color: var(--text-muted);
+  background: none; border: none; font-family: inherit;
+}
+.nav-tab.active { color: var(--text); }
+.nav-tab.active .ic { color: var(--good); }
+.nav-tab .ic { width: 22px; height: 22px; }
+.nav-tab .lbl { font-size: 10px; letter-spacing: 0.04em; }
+
+/* ===== tabs (panel switcher) ===== */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ===== misc ===== */
+.spark { width: 70px; height: 24px; }
+.spark path { fill: none; stroke-width: 1.5; stroke-linecap: round; }
+.note { font-size: 11px; color: var(--text-muted); padding: 8px 12px; background: var(--bg-elev); border-radius: 8px; border-left: 2px solid var(--warn); margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<header class="top-bar">
+  <div class="brand">VYR</div>
+  <div class="device-pill"><span class="dot"></span> JStyle X5 · 68%</div>
+</header>
+
+<main class="app-shell">
+
+  <!-- ===========================================================
+       TAB: TODAY  (resumo do dia, scores agregados)
+  ============================================================ -->
+  <div class="tab-panel active" data-tab="today">
+    <div class="greeting">
+      <div class="date">Sábado, 09 de Maio</div>
+      <h1>Bom dia, <em>Diego</em></h1>
+    </div>
+
+    <div class="score-row">
+      <div class="score-card">
+        <div class="score-donut">
+          <svg viewBox="0 0 100 100">
+            <circle class="bg-ring" cx="50" cy="50" r="44"/>
+            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#6ee7b7"
+              stroke-dasharray="276.46" stroke-dashoffset="63.6"/>
+          </svg>
+          <div class="label"><div class="num">77</div><div class="max">/ 100</div></div>
+        </div>
+        <div class="name">Readiness</div>
+        <div class="delta up">↑ 4 vs média</div>
+      </div>
+      <div class="score-card">
+        <div class="score-donut">
+          <svg viewBox="0 0 100 100">
+            <circle class="bg-ring" cx="50" cy="50" r="44"/>
+            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#c4b5fd"
+              stroke-dasharray="276.46" stroke-dashoffset="91.2"/>
+          </svg>
+          <div class="label"><div class="num">67</div><div class="max">/ 100</div></div>
+        </div>
+        <div class="name">Sono</div>
+        <div class="delta down">↓ 8 vs média</div>
+      </div>
+      <div class="score-card">
+        <div class="score-donut">
+          <svg viewBox="0 0 100 100">
+            <circle class="bg-ring" cx="50" cy="50" r="44"/>
+            <circle class="fg-ring" cx="50" cy="50" r="44" stroke="#fbbf24"
+              stroke-dasharray="276.46" stroke-dashoffset="138.2"/>
+          </svg>
+          <div class="label"><div class="num">50</div><div class="max">/ 100</div></div>
+        </div>
+        <div class="name">Atividade</div>
+        <div class="delta">— meta 8k</div>
+      </div>
+    </div>
+
+    <section>
+      <div class="section-head">
+        <h2>Destaques de hoje</h2>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            Frequência cardíaca
+          </div>
+          <div class="card-sub"><span class="ok">●</span> normal</div>
+        </div>
+        <div class="card-value">
+          <span class="big">87</span><span class="unit">bpm média</span>
+        </div>
+        <div class="card-sub">Repouso 53 · Pico 126 · 1.587 leituras hoje</div>
+        <div class="trend">
+          <svg viewBox="0 0 280 64" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="hrGrad" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stop-color="#f472b6" stop-opacity="0.5"/>
+                <stop offset="1" stop-color="#f472b6" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path class="area" fill="url(#hrGrad)"
+              d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32 L280,64 L0,64 Z"/>
+            <path class="line" stroke="#f472b6"
+              d="M0,40 L20,38 L40,42 L60,30 L80,22 L100,28 L120,18 L140,12 L160,20 L180,15 L200,28 L220,35 L240,30 L260,38 L280,32"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            Sono última noite
+          </div>
+          <div class="card-sub">6h 24m</div>
+        </div>
+        <div class="card-value">
+          <span class="big">77</span><span class="unit">% eficiência</span>
+        </div>
+        <div class="card-sub">Profundo 91min · Leve 292min · Acordado 3min</div>
+        <div class="sleep-stages">
+          <div style="background:var(--sleep-light); flex: 4"></div>
+          <div style="background:var(--sleep-deep); flex: 2"></div>
+          <div style="background:var(--sleep-light); flex: 3"></div>
+          <div style="background:var(--sleep-deep); flex: 2"></div>
+          <div style="background:var(--sleep-light); flex: 5"></div>
+          <div style="background:var(--sleep-awake); flex: 0.3"></div>
+          <div style="background:var(--sleep-light); flex: 2"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===========================================================
+       TAB: VITALS  (cards individuais por biomarcador)
+  ============================================================ -->
+  <div class="tab-panel" data-tab="vitals">
+    <div class="greeting">
+      <div class="date">Sinais vitais</div>
+      <h1>Seus <em>biomarcadores</em></h1>
+    </div>
+
+    <!-- HR -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#f472b6" stroke-width="1.6"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          Frequência cardíaca
+        </div>
+        <div class="card-sub"><span class="ok">normal</span></div>
+      </div>
+      <div class="card-value">
+        <span class="big">87</span><span class="unit">bpm · média 7d</span>
+      </div>
+      <div class="card-sub">Repouso médio 65 · Variação dia 53 – 126</div>
+      <div class="range-bar">
+        <div class="baseline" style="left: 35%; right: 45%;"></div>
+        <div class="marker" style="left: 47%;"></div>
+      </div>
+      <div class="range-labels"><span>40</span><span>baseline 60–80</span><span>180</span></div>
+      <div class="trend">
+        <svg viewBox="0 0 280 64" preserveAspectRatio="none">
+          <defs><linearGradient id="hrGrad2" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f472b6" stop-opacity="0.4"/><stop offset="1" stop-color="#f472b6" stop-opacity="0"/></linearGradient></defs>
+          <path class="area" fill="url(#hrGrad2)" d="M0,32 L40,28 L80,35 L120,22 L160,18 L200,30 L240,25 L280,28 L280,64 L0,64 Z"/>
+          <path class="line" stroke="#f472b6" d="M0,32 L40,28 L80,35 L120,22 L160,18 L200,30 L240,25 L280,28"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- HRV -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Variabilidade cardíaca (RMSSD)
+        </div>
+        <div class="card-sub"><span class="warn">tuning</span></div>
+      </div>
+      <div class="card-value">
+        <span class="big">42</span><span class="unit">ms · estimado PPG</span>
+      </div>
+      <div class="card-sub">2 medições nos últimos 14 dias · ideal 30–80ms</div>
+      <div class="range-bar">
+        <div class="baseline" style="left: 30%; right: 40%;"></div>
+        <div class="marker" style="left: 42%;"></div>
+      </div>
+      <div class="range-labels"><span>0</span><span>baseline 30–80</span><span>120</span></div>
+      <div class="note">Algoritmo de peak detection ainda em ajuste fino. Próximas medições com mais precisão.</div>
+    </div>
+
+    <!-- Sleep card detalhado -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          Sono · 12 noites
+        </div>
+        <div class="card-sub">média 5h 32m</div>
+      </div>
+      <div class="card-value">
+        <span class="big">6:24</span><span class="unit">h última noite</span>
+      </div>
+      <div class="sleep-stages">
+        <div style="background:var(--sleep-light); flex: 4.86"></div>
+        <div style="background:var(--sleep-deep); flex: 1.51"></div>
+        <div style="background:var(--sleep-light); flex: 0.05"></div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="swatch" style="background:var(--sleep-deep)"></div>Profundo</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--sleep-light)"></div>Leve</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--sleep-rem)"></div>REM</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--sleep-awake)"></div>Acordado</div>
+      </div>
+      <div class="stage-stats">
+        <div class="stage-stat"><div class="v">91</div><div class="l">Profundo</div></div>
+        <div class="stage-stat"><div class="v">292</div><div class="l">Leve</div></div>
+        <div class="stage-stat"><div class="v">0</div><div class="l">REM</div></div>
+        <div class="stage-stat"><div class="v">3</div><div class="l">Acordado</div></div>
+      </div>
+    </div>
+
+    <!-- Atividade -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">
+          <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Atividade
+        </div>
+        <div class="card-sub">meta 8.000</div>
+      </div>
+      <div class="card-value">
+        <span class="big">1.519</span><span class="unit">passos hoje</span>
+      </div>
+      <div class="range-bar">
+        <div class="baseline" style="left: 0%; right: 81%;"></div>
+        <div class="marker" style="left: 19%;"></div>
+      </div>
+      <div class="range-labels"><span>0</span><span>meta 8k</span><span>15k</span></div>
+      <div class="card-sub" style="margin-top: 10px;">Última atividade registrada: 27/04 · 1.519 passos</div>
+    </div>
+
+    <!-- Mini grid: Battery / SpO2 / Temp / Stress -->
+    <div class="kpi-grid" style="margin-top: 16px;">
+      <div class="kpi">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="1.6"><rect x="2" y="6" width="18" height="12" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/></svg>
+        <div class="lbl">Bateria anel</div>
+        <div class="val">68%</div>
+        <div class="sub">JStyle X5 · agora</div>
+      </div>
+      <div class="kpi">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+        <div class="lbl">SpO₂</div>
+        <div class="val">—</div>
+        <div class="sub">aguardando coleta</div>
+      </div>
+      <div class="kpi">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="1.6"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+        <div class="lbl">Temperatura</div>
+        <div class="val">—</div>
+        <div class="sub">aguardando coleta</div>
+      </div>
+      <div class="kpi">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        <div class="lbl">Estresse</div>
+        <div class="val">—</div>
+        <div class="sub">aguardando coleta</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===========================================================
+       TAB: TRENDS / Insights (gráficos longos)
+  ============================================================ -->
+  <div class="tab-panel" data-tab="trends">
+    <div class="greeting">
+      <div class="date">Tendências</div>
+      <h1>Sua <em>história</em></h1>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Sono · últimas 2 semanas</div>
+        <div class="card-sub">total/noite (h)</div>
+      </div>
+      <div class="weekly" id="sleepWeekly"></div>
+      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
+        <span>16/abr</span><span>30/abr</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">FC média diária</div>
+        <div class="card-sub">bpm</div>
+      </div>
+      <div class="weekly" id="hrWeekly"></div>
+      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
+        <span>29/abr</span><span>01/mai</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">Sono profundo (% por noite)</div>
+        <div class="card-sub">ideal &gt; 15%</div>
+      </div>
+      <div class="weekly" id="deepWeekly"></div>
+      <div style="margin-top: 24px; font-size: 10px; color: var(--text-muted); display: flex; justify-content: space-between;">
+        <span>16/abr</span><span>30/abr</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===========================================================
+       TAB: HOME (placeholder — link pra app real)
+  ============================================================ -->
+  <div class="tab-panel" data-tab="home">
+    <div class="greeting"><div class="date">Início</div><h1>Início do app</h1></div>
+    <div class="card"><div class="card-sub">Tela home do VYR (já existente)</div></div>
+  </div>
+
+  <div class="tab-panel" data-tab="profile">
+    <div class="greeting"><div class="date">Perfil</div><h1>Diego</h1></div>
+    <div class="card"><div class="card-sub">Configurações, anel, integrações</div></div>
+  </div>
+
+</main>
+
+<!-- ===== bottom nav ===== -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-inner">
+    <button class="nav-tab" data-target="home">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span class="lbl">Home</span>
+    </button>
+    <button class="nav-tab active" data-target="today">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="lbl">Hoje</span>
+    </button>
+    <button class="nav-tab" data-target="vitals">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <span class="lbl">Vitais</span>
+    </button>
+    <button class="nav-tab" data-target="trends">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      <span class="lbl">Tendências</span>
+    </button>
+    <button class="nav-tab" data-target="profile">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="lbl">Perfil</span>
+    </button>
+  </div>
+</nav>
+
+<script>
+// ===== Real Diego data (pulled from Supabase 2026-05-09) =====
+const sleepNights = [
+  {d:'16/04', h:3.8, deep:25}, {d:'17/04', h:6.6, deep:51}, {d:'18/04', h:1.7, deep:21},
+  {d:'19/04', h:11.2, deep:127}, {d:'20/04', h:4.8, deep:52}, {d:'21/04', h:1.4, deep:2},
+  {d:'22/04', h:6.6, deep:88}, {d:'23/04', h:3.2, deep:30}, {d:'24/04', h:4.6, deep:51},
+  {d:'28/04', h:1.9, deep:24}, {d:'29/04', h:6.4, deep:62}, {d:'30/04', h:6.4, deep:91},
+];
+const hrDaily = [
+  {d:'29/04', avg:86, n:1060}, {d:'30/04', avg:87, n:1587}, {d:'01/05', avg:89, n:767},
+];
+
+// Build sleep weekly bars
+const sw = document.getElementById('sleepWeekly');
+const maxH = Math.max(...sleepNights.map(n => n.h));
+sw.innerHTML = sleepNights.map(n => {
+  const pct = Math.round(n.h / maxH * 100);
+  const color = n.h >= 7 ? 'var(--good)' : n.h >= 5 ? 'var(--warn)' : 'var(--bad)';
+  return `<div class="bar" style="height:${pct}%;background:linear-gradient(180deg, ${color}, transparent);"><span class="lbl">${n.h}</span></div>`;
+}).join('');
+
+// Build HR daily bars
+const hw = document.getElementById('hrWeekly');
+const maxHR = Math.max(...hrDaily.map(d => d.avg));
+hw.innerHTML = hrDaily.map(d => {
+  const pct = Math.round(d.avg / maxHR * 100);
+  return `<div class="bar" style="height:${pct}%;background:linear-gradient(180deg, var(--hr), transparent);"><span class="lbl">${d.avg}</span></div>`;
+}).join('');
+
+// Build deep sleep % bars
+const dw = document.getElementById('deepWeekly');
+dw.innerHTML = sleepNights.map(n => {
+  const pct = n.h > 0 ? (n.deep / (n.h * 60)) * 100 : 0;
+  const ok = pct >= 15;
+  const heightPct = Math.min(100, pct * 3);
+  const color = ok ? 'var(--good)' : 'var(--warn)';
+  return `<div class="bar" style="height:${heightPct}%;background:linear-gradient(180deg, ${color}, transparent);"><span class="lbl">${Math.round(pct)}%</span></div>`;
+}).join('');
+
+// Tab switcher
+document.querySelectorAll('.nav-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelector(`.tab-panel[data-tab="${tab.dataset.target}"]`).classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+</script>
+
+</body>
+</html>
