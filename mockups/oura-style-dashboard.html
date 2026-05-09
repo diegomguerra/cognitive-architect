@@ -188,11 +188,29 @@ section { margin-bottom:26px; }
 .report-stat .v { font-family:var(--mono); font-size:13px; }
 .report-cta { display:block; width:100%; background:var(--text); color:var(--bg); padding:14px; border-radius:12px; font-size:13px; font-weight:600; text-align:center; cursor:pointer; border:none; margin-top:10px; }
 
-/* score formula box */
+/* score formula box (legacy, mantido pra Sono interno) */
 .formula-box { background:var(--bg-elev); border:1px solid var(--card-border); border-radius:12px; padding:14px; margin-top:14px; font-size:12px; line-height:1.7; color:var(--text-dim); }
 .formula-box .h { font-family:var(--mono); font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.15em; margin-bottom:8px; }
 .formula-box .row { display:flex; justify-content:space-between; }
 .formula-box code { font-family:var(--mono); font-size:11px; color:var(--text); }
+
+/* score weight card (cards visuais dos pesos da literatura) */
+.weight-card { background:var(--card); border:1px solid var(--card-border); border-radius:18px; padding:18px; margin-bottom:12px; }
+.weight-card-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; }
+.weight-card-head .badge { width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.weight-card-head .badge svg { width:18px; height:18px; stroke-width:1.6; }
+.weight-card-head h3 { font-family:var(--display); font-size:16px; font-weight:500; letter-spacing:-.01em; color:var(--text); }
+.weight-card-head .sub { font-size:11px; color:var(--text-muted); margin-top:2px; }
+.weight-list { margin-top:14px; }
+.weight-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--card-border); }
+.weight-row:last-child { border-bottom:0; }
+.weight-row .pct { font-family:var(--mono); font-size:13px; font-weight:500; color:var(--text); min-width:40px; text-align:right; }
+.weight-row .name-block { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.weight-row .name { font-size:13px; color:var(--text); font-weight:500; }
+.weight-row .desc { font-size:10px; color:var(--text-muted); line-height:1.4; }
+.weight-bar-wrap { width:100%; height:5px; background:var(--card-border); border-radius:3px; overflow:hidden; margin-top:6px; }
+.weight-bar { height:100%; border-radius:3px; }
+.weight-card-foot { font-family:var(--mono); font-size:10px; color:var(--text-muted); margin-top:14px; padding-top:12px; border-top:1px solid var(--card-border); letter-spacing:.04em; }
 </style>
 </head>
 <body>
@@ -286,11 +304,180 @@ section { margin-bottom:26px; }
         </div>
       </div>
 
-      <div class="formula-box">
-        <div class="h">Pesos da Literatura</div>
-        <div class="row"><span>Sleep</span><code>30% dur · 25% efic · 20% deep · 15% REM · 10% cont</code></div>
-        <div class="row"><span>Readiness</span><code>30% HRV · 25% sono · 20% RHR · 15% recup · 10% temp</code></div>
-        <div class="row"><span>Activity</span><code>30% steps · 25% min ativos · 20% cal · 15% reg · 10% sed</code></div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Como calculamos seus scores</h2>
+        <span class="more">literatura</span>
+      </div>
+
+      <!-- Sleep weights -->
+      <div class="weight-card">
+        <div class="weight-card-head">
+          <div class="badge" style="background:hsl(230 70% 70% / 0.15)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--sleep-light)"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </div>
+          <div>
+            <h3>Score de Sono</h3>
+            <div class="sub">Como sua noite é avaliada · 0–100</div>
+          </div>
+        </div>
+        <div class="weight-list">
+          <div class="weight-row">
+            <span class="pct">30%</span>
+            <div class="name-block">
+              <span class="name">Duração</span>
+              <span class="desc">Tempo total de sono vs alvo 7–9h (NSF guidelines)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:30%;background:var(--sleep-light)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">25%</span>
+            <div class="name-block">
+              <span class="name">Eficiência</span>
+              <span class="desc">Tempo dormindo / tempo na cama (ideal &gt; 85%)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:25%;background:var(--sleep-light)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">20%</span>
+            <div class="name-block">
+              <span class="name">Sono Profundo</span>
+              <span class="desc">% em deep sleep (alvo 13–23% — Walker 2017)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:20%;background:var(--sleep-deep)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">15%</span>
+            <div class="name-block">
+              <span class="name">Sono REM</span>
+              <span class="desc">% em REM (alvo 20–25% — função cognitiva/emocional)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:15%;background:var(--sleep-rem)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">10%</span>
+            <div class="name-block">
+              <span class="name">Continuidade</span>
+              <span class="desc">Poucos despertares — sono ininterrupto</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:10%;background:var(--sleep-awake)"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="weight-card-foot">FONTE · NSF · WALKER 2017 · OURA WHITEPAPER</div>
+      </div>
+
+      <!-- Readiness weights -->
+      <div class="weight-card">
+        <div class="weight-card-head">
+          <div class="badge" style="background:hsl(150 55% 65% / 0.15)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--good)"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div>
+            <h3>Score de Prontidão</h3>
+            <div class="sub">O quão recuperado você está hoje · 0–100</div>
+          </div>
+        </div>
+        <div class="weight-list">
+          <div class="weight-row">
+            <span class="pct">30%</span>
+            <div class="name-block">
+              <span class="name">HRV (RMSSD)</span>
+              <span class="desc">Variabilidade da FC — proxy do sistema nervoso autônomo</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:30%;background:var(--hrv)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">25%</span>
+            <div class="name-block">
+              <span class="name">Sono da noite anterior</span>
+              <span class="desc">Score de sono multiplicado pela qualidade da semana</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:25%;background:var(--sleep-light)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">20%</span>
+            <div class="name-block">
+              <span class="name">Frequência Cardíaca de Repouso</span>
+              <span class="desc">RHR comparada ao seu próprio baseline</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:20%;background:var(--hr)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">15%</span>
+            <div class="name-block">
+              <span class="name">Recuperação de Atividade</span>
+              <span class="desc">Equilíbrio entre carga (treino) e descanso</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:15%;background:var(--steps)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">10%</span>
+            <div class="name-block">
+              <span class="name">Temperatura corporal</span>
+              <span class="desc">Desvio do baseline (sinal de fadiga/infecção)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:10%;background:var(--temp)"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="weight-card-foot">FONTE · WHOOP · OURA · SHAFFER &amp; GINSBERG 2017 (HRV)</div>
+      </div>
+
+      <!-- Activity weights -->
+      <div class="weight-card">
+        <div class="weight-card-head">
+          <div class="badge" style="background:hsl(40 80% 60% / 0.15)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--steps)"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div>
+            <h3>Score de Atividade</h3>
+            <div class="sub">Movimento ao longo do dia · 0–100</div>
+          </div>
+        </div>
+        <div class="weight-list">
+          <div class="weight-row">
+            <span class="pct">30%</span>
+            <div class="name-block">
+              <span class="name">Passos diários</span>
+              <span class="desc">Meta 8–10k (recomendação OMS adultos saudáveis)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:30%;background:var(--steps)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">25%</span>
+            <div class="name-block">
+              <span class="name">Minutos ativos (MVPA)</span>
+              <span class="desc">Atividade moderada/vigorosa · 150min/semana (ACSM)</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:25%;background:var(--steps)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">20%</span>
+            <div class="name-block">
+              <span class="name">Calorias queimadas</span>
+              <span class="desc">Estimativa baseada em FC e atividade</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:20%;background:var(--steps)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">15%</span>
+            <div class="name-block">
+              <span class="name">Regularidade</span>
+              <span class="desc">Movimento espalhado vs concentrado em 1 sessão</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:15%;background:var(--steps)"></div></div>
+            </div>
+          </div>
+          <div class="weight-row">
+            <span class="pct">10%</span>
+            <div class="name-block">
+              <span class="name">Sedentarismo</span>
+              <span class="desc">Quebrar tempo sentado a cada hora reduz risco</span>
+              <div class="weight-bar-wrap"><div class="weight-bar" style="width:10%;background:var(--bad)"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="weight-card-foot">FONTE · OMS · ACSM · MATTHEWS et al 2012 (sedentarismo)</div>
       </div>
     </section>
   </div>
