@@ -6,7 +6,7 @@
 <title>VYR · Insights · mockup v2</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: hsl(225 14% 6%);
@@ -34,9 +34,11 @@
   --energia: hsl(190 70% 60%);
   --clareza: hsl(50 75% 65%);
   --estabilidade: hsl(280 55% 70%);
-  --serif: 'Cormorant Garamond', Georgia, serif;
+  /* Tipografia VYR: Inter + JetBrains Mono (sem serifs) */
   --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: 'JetBrains Mono', monospace;
+  /* Para títulos elegantes uso Inter weight 200/300 com tracking aberto */
+  --display: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
 html, body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
@@ -46,15 +48,15 @@ button { font-family: inherit; }
 
 /* top bar */
 .top-bar { display:flex; align-items:center; justify-content:space-between; padding:18px 16px 12px; position:sticky; top:0; background:linear-gradient(180deg,var(--bg) 70%,transparent); z-index:10; }
-.brand { font-family:var(--serif); font-size:22px; font-weight:500; letter-spacing:.04em; }
+.brand { font-family:var(--display); font-size:22px; font-weight:300; letter-spacing:.18em; }
 .device-pill { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); background:var(--card); border:1px solid var(--card-border); padding:6px 10px; border-radius:99px; }
 .dot { width:6px; height:6px; border-radius:50%; background:var(--good); box-shadow:0 0 8px var(--good); }
 
 /* greeting */
 .greeting { padding:8px 0 18px; }
 .greeting .date { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.12em; margin-bottom:4px; }
-.greeting h1 { font-family:var(--serif); font-size:28px; font-weight:400; line-height:1.15; }
-.greeting h1 em { font-style:italic; color:var(--text-dim); }
+.greeting h1 { font-family:var(--display); font-size:30px; font-weight:200; line-height:1.15; letter-spacing:-.01em; }
+.greeting h1 em { font-style:normal; color:var(--text-dim); font-weight:300; }
 
 /* ===== HOME — VYR State central ===== */
 .vyr-state-hero { background:linear-gradient(180deg, var(--card) 0%, var(--bg-elev) 100%); border:1px solid var(--card-border); border-radius:24px; padding:20px 16px; margin-bottom:14px; text-align:center; }
@@ -65,7 +67,7 @@ button { font-family: inherit; }
 .vyr-state-hero .donut-big .fg-ring { fill:none; stroke-width:6; stroke-linecap:round; }
 .vyr-state-hero .donut-big .label { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
 .vyr-state-hero .donut-big .label .lbl-top { font-family:var(--mono); font-size:9px; letter-spacing:.2em; color:var(--text-muted); text-transform:uppercase; }
-.vyr-state-hero .donut-big .label .num { font-family:var(--serif); font-size:62px; font-weight:500; line-height:1; margin-top:6px; }
+.vyr-state-hero .donut-big .label .num { font-family:var(--display); font-size:64px; font-weight:200; line-height:1; margin-top:6px; letter-spacing:-.04em; }
 .vyr-state-hero .donut-big .label .lbl { font-size:13px; color:var(--text-dim); margin-top:4px; }
 .pillars-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:18px; }
 .pillar { padding:10px 6px; }
@@ -83,7 +85,7 @@ button { font-family: inherit; }
 .donut-sm .bg-ring { fill:none; stroke:var(--card-border); stroke-width:5; }
 .donut-sm .fg-ring { fill:none; stroke-width:5; stroke-linecap:round; }
 .donut-sm .label { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
-.donut-sm .num { font-family:var(--serif); font-size:28px; font-weight:500; line-height:1; }
+.donut-sm .num { font-family:var(--display); font-size:30px; font-weight:300; line-height:1; letter-spacing:-.02em; }
 .donut-sm .max { font-size:9px; color:var(--text-muted); margin-top:2px; }
 .score-card .name { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.1em; }
 .score-card .delta { font-size:10px; color:var(--text-muted); margin-top:2px; }
@@ -93,7 +95,7 @@ button { font-family: inherit; }
 /* sections */
 section { margin-bottom:26px; }
 .section-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
-.section-head h2 { font-family:var(--serif); font-size:18px; font-weight:500; letter-spacing:.01em; }
+.section-head h2 { font-family:var(--display); font-size:18px; font-weight:500; letter-spacing:-.01em; }
 .section-head .more { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.1em; cursor:pointer; }
 
 /* generic card */
@@ -102,7 +104,7 @@ section { margin-bottom:26px; }
 .card-title { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
 .card-title .ic { width:16px; height:16px; opacity:.85; }
 .card-value { display:flex; align-items:baseline; gap:6px; }
-.card-value .big { font-family:var(--serif); font-size:36px; font-weight:500; line-height:1; }
+.card-value .big { font-family:var(--display); font-size:38px; font-weight:300; line-height:1; letter-spacing:-.02em; }
 .card-value .unit { font-size:12px; color:var(--text-muted); }
 .card-sub { font-size:11px; color:var(--text-muted); margin-top:6px; }
 .card-sub .ok { color:var(--good); }
@@ -123,7 +125,7 @@ section { margin-bottom:26px; }
 .legend-item .swatch { width:10px; height:10px; border-radius:2px; }
 .stage-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:16px; }
 .stage-stat { text-align:center; padding:8px 0; border-top:1px solid var(--card-border); }
-.stage-stat .v { font-family:var(--serif); font-size:18px; font-weight:500; }
+.stage-stat .v { font-family:var(--display); font-size:18px; font-weight:400; }
 .stage-stat .v small { font-size:11px; color:var(--text-muted); margin-left:1px; }
 .stage-stat .l { font-size:9px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.1em; margin-top:2px; }
 
@@ -150,7 +152,7 @@ section { margin-bottom:26px; }
 .kpi { background:var(--card); border:1px solid var(--card-border); border-radius:14px; padding:14px; }
 .kpi .ic { width:18px; height:18px; opacity:.7; margin-bottom:8px; }
 .kpi .lbl { font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.08em; }
-.kpi .val { font-family:var(--serif); font-size:24px; font-weight:500; margin-top:4px; }
+.kpi .val { font-family:var(--display); font-size:24px; font-weight:400; margin-top:4px; }
 .kpi .sub { font-size:10px; color:var(--text-muted); margin-top:2px; }
 
 /* bottom nav */
@@ -179,7 +181,7 @@ section { margin-bottom:26px; }
 
 /* report styles */
 .report-section { margin-bottom:22px; }
-.report-section h3 { font-family:var(--serif); font-size:18px; font-weight:500; margin-bottom:8px; }
+.report-section h3 { font-family:var(--display); font-size:18px; font-weight:500; margin-bottom:8px; letter-spacing:-.01em; }
 .report-section .desc { font-size:12px; color:var(--text-dim); margin-bottom:14px; }
 .report-stat { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--card-border); }
 .report-stat .l { font-size:12px; color:var(--text-dim); }
@@ -540,7 +542,7 @@ section { margin-bottom:26px; }
     <div class="modal-head">
       <div>
         <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.12em;">Relatório semanal</div>
-        <div style="font-family:var(--serif);font-size:20px;margin-top:2px;">28/04 — 04/05</div>
+        <div style="font-family:var(--display);font-size:22px;font-weight:300;margin-top:2px;letter-spacing:-.01em;">28/04 — 04/05</div>
       </div>
       <button class="close" onclick="document.getElementById('weekly').classList.remove('open')">×</button>
     </div>
