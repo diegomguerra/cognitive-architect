@@ -9,13 +9,13 @@
 /* Begin PBXBuildFile section */
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
-		A1B2C3D511110001AABBCCDD /* RingParsers in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D511110002AABBCCDD /* RingParsers */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		A1B2C3D400000001AABBCCDD /* VYRHealthBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCCDD /* VYRHealthBridge.swift */; };
 		A1B2C3D400000003AABBCCDD /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000004AABBCCDD /* MyViewController.swift */; };
+		A1B2C3D511110001AABBCCDD /* RingParsers in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D511110002AABBCCDD /* RingParsers */; };
 		BF5FF506DB73F5663A7181C7 /* QRingPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 239DEC52F882B72E8F595731 /* QRingPlugin.swift */; };
 		E7A66ED694BFA3729EE180DE /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0D46914A4942C3500AECEBB /* Pods_App.framework */; };
 /* End PBXBuildFile section */
@@ -366,9 +366,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 369;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 376;
 				DEVELOPMENT_TEAM = WNB4G5T7Z6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = App/Info.plist;
@@ -381,7 +381,7 @@
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.vyrlabs.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
+				PROVISIONING_PROFILE_SPECIFIER = "com.vyrlabs.app AppStore";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OBJC_BRIDGING_HEADER = "App/App-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -397,9 +397,9 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 369;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 376;
 				DEVELOPMENT_TEAM = WNB4G5T7Z6;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = App/Info.plist;
@@ -411,7 +411,7 @@
 				MARKETING_VERSION = 8.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vyrlabs.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
+				PROVISIONING_PROFILE_SPECIFIER = "com.vyrlabs.app AppStore";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "App/App-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -443,13 +443,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		A1B2C3D511110003AABBCCDD /* XCLocalSwiftPackageReference "RingParsers" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/RingParsers;
+		};
 		D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "CapApp-SPM";
-		};
-		A1B2C3D511110003AABBCCDD /* XCLocalSwiftPackageReference "RingParsers" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../Packages/RingParsers";
 		};
 /* End XCLocalSwiftPackageReference section */
 

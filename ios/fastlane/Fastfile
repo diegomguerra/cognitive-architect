@@ -140,12 +140,30 @@ platform :ios do
 
     cocoapods(podfile: "App/Podfile", try_repo_update_on_error: true)
 
-    # Force Manual Signing with explicit provisioning profile to avoid the
-    # "iOS Team Store Provisioning Profile" auto-fetch failure when the Mac
-    # has no Apple ID configured in Xcode. Uses VYR App Store Build346 (or
-    # whichever profile name is current) — must match a profile installed
-    # at ~/Library/MobileDevice/Provisioning Profiles/ that includes the
-    # current iPhone Distribution cert in the keychain.
+    # Download/install the App Store provisioning profile from App Store
+    # Connect via API key. Avoids the "No profile for team WNB4G5T7Z6
+    # matching VYR App Store Build346" failure when the Mac mini's
+    # ~/Library/MobileDevice/Provisioning Profiles/ is missing the file.
+    sigh(
+      api_key: api_key,
+      app_identifier: "com.vyrlabs.app",
+      force: true,
+      output_path: "build"
+    )
+    profile_name = lane_context[SharedValues::SIGH_NAME]
+
+    # Force Manual Signing on the App target ONLY (not Pods — Pods don't
+    # support provisioning profiles). update_code_signing_settings flips
+    # the project.pbxproj before xcodebuild runs.
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "App/App.xcodeproj",
+      targets: ["App"],
+      profile_name: profile_name,
+      team_id: "WNB4G5T7Z6",
+      code_sign_identity: "Apple Distribution"
+    )
+
     build_app(
       workspace: "App/App.xcworkspace",
       scheme: "App",
@@ -158,7 +176,7 @@ platform :ios do
       export_options: {
         method: "app-store",
         signingStyle: "manual",
-        provisioningProfiles: { "com.vyrlabs.app" => "VYR App Store Build346" },
+        provisioningProfiles: { "com.vyrlabs.app" => profile_name },
         teamID: "WNB4G5T7Z6"
       }
     )
