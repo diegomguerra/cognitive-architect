@@ -1,8 +1,9 @@
-import { Home, FlaskConical, Settings } from 'lucide-react';
+import { Home, FlaskConical, Settings, Activity } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const tabs = [
   { path: '/', label: 'Home', icon: Home },
+  { path: '/insights', label: 'Insights', icon: Activity },
   { path: '/labs', label: 'Labs', icon: FlaskConical },
   { path: '/settings', label: 'Config', icon: Settings },
 ];
@@ -15,7 +16,9 @@ const BottomNav = () => {
     <nav className="fixed bottom-0 left-0 right-0 z-20 bg-vyr-bg-primary border-t border-vyr-stroke-divider safe-area-bottom">
       <div className="flex items-center justify-around py-2">
         {tabs.map(({ path, label, icon: Icon }) => {
-          const active = location.pathname === path;
+          const active = path === '/insights'
+            ? location.pathname.startsWith('/insights')
+            : location.pathname === path;
           return (
             <button
               key={path}

@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Home from "./pages/Home";
+import InsightsScreen from "./screens/InsightsScreen";
+import InsightsIndexDetailScreen from "./screens/InsightsIndexDetailScreen";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -40,6 +42,8 @@ const AppRoutes = () => (
     <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
     <Route path="/reset-password" element={<ResetPassword />} />
     <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+    <Route path="/insights" element={<ProtectedRoute><InsightsScreen /></ProtectedRoute>} />
+    <Route path="/insights/:type" element={<ProtectedRoute><InsightsIndexDetailScreen /></ProtectedRoute>} />
     <Route path="/labs" element={<ProtectedRoute><Labs /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
     <Route path="/state" element={<ProtectedRoute><StateDetail /></ProtectedRoute>} />

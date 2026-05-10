@@ -16,6 +16,13 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
+        // Design System v1 (Insights tab): Inter Tight para titulos/numbers
+        tight: ['"Inter Tight"', 'Inter', '-apple-system', 'system-ui', 'sans-serif'],
+      },
+      letterSpacing: {
+        wide1: '0.16em',
+        wide2: '0.22em',
+        wide3: '0.30em',
       },
       colors: {
         border: "hsl(var(--border))",
@@ -83,6 +90,25 @@ export default {
             baixo: "hsl(var(--vyr-score-baixo))",
             critico: "hsl(var(--vyr-score-critico))",
           },
+        },
+        // Design System v1 (Insights) — paleta hex do vyr-system-design.html
+        ds: {
+          bg0: '#0A0A0A',
+          bg1: '#111111',
+          bg2: '#161616',
+          bg3: '#1C1C1C',
+          ink0: '#FAFAFA',
+          ink1: '#A1A1AA',
+          ink2: '#525252',
+          ink3: '#3F3F46',
+          opt: '#FAFAFA',
+          good: '#94A3B8',
+          fair: '#D97706',
+          low: '#DC2626',
+          boot: '#FAFAFA',
+          hold: '#D97706',
+          clear: '#94A3B8',
+          cold: '#1E293B',
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
