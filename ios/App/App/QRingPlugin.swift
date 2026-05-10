@@ -106,7 +106,13 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let JS_CMD_GET_HR:        UInt8 = 0x54  // continuous HR history
     // 0x55 GET_ONCE_HR removed — phantom cmd, not in SDK
     private static let JS_CMD_GET_HRV:       UInt8 = 0x56  // HRV + stress + BP
-    private static let JS_CMD_GET_SPO2:      UInt8 = 0x57  // SpO2 history
+    // SpO2 history — 2 cmds distintos no SDK X3 (decifrados via libBleSDK.a 2026-05-10):
+    //   0x66 = GetAutomaticSpo2DataWithMode  → histórico das medições auto (pareadas com SetAuto dataType=2)
+    //   0x57 = GetContinuousSpO2DataWithMode → histórico modo contínuo (apenas se ativado)
+    // Build 370 troca o cmd primário 0x57 → 0x66, pois o que configuramos via SetAuto
+    // é Automatic SpO2, não Continuous. Ambos vão na fila como fallback.
+    private static let JS_CMD_GET_SPO2:      UInt8 = 0x66  // automatic SpO2 history (PRIMARY)
+    private static let JS_CMD_GET_SPO2_CONT: UInt8 = 0x57  // continuous SpO2 history (fallback)
     private static let JS_CMD_GET_TEMP:      UInt8 = 0x62  // temperature history
     private static let JS_CMD_GET_PPI:       UInt8 = 0x63  // PPI/RRI history
 
@@ -580,7 +586,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self.jsHistoryQueue = [
                 Self.JS_CMD_GET_HR,     // 0x54 continuous HR
                 Self.JS_CMD_GET_HRV,    // 0x56 HRV + stress
-                Self.JS_CMD_GET_SPO2,   // 0x57 SpO2
+                Self.JS_CMD_GET_SPO2,      // 0x66 Automatic SpO2 history (primary)
+                Self.JS_CMD_GET_SPO2_CONT, // 0x57 Continuous SpO2 (fallback)
                 Self.JS_CMD_GET_TEMP,   // 0x62 temperature
                 Self.JS_CMD_GET_TOTAL,  // 0x51 daily steps
                 Self.JS_CMD_GET_SLEEP,  // 0x53 sleep
@@ -663,7 +670,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 case Self.JS_CMD_GET_HRV:
                     self.flushJStyleType("hrv", &self.hrvSamples)
                     self.flushJStyleType("stress", &self.stressSamples)
-                case Self.JS_CMD_GET_SPO2:  self.flushJStyleType("spo2", &self.spo2Samples)
+                case Self.JS_CMD_GET_SPO2, Self.JS_CMD_GET_SPO2_CONT:
+                    self.flushJStyleType("spo2", &self.spo2Samples)
                 case Self.JS_CMD_GET_TEMP:  self.flushJStyleType("temp", &self.tempSamples)
                 case Self.JS_CMD_GET_TOTAL: self.flushJStyleType("steps", &self.stepsSamples)
                 case Self.JS_CMD_GET_SLEEP: self.flushJStyleType("sleep", &self.sleepSamples)
@@ -887,13 +895,13 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
                 jsSendHistoryRequest(cmd: Self.JS_CMD_GET_HRV, mode: 0x02)
             }
 
-        case Self.JS_CMD_GET_SPO2:  // 0x57
+        case Self.JS_CMD_GET_SPO2, Self.JS_CMD_GET_SPO2_CONT:  // 0x66 / 0x57
             parseJStyleSpO2(b)
             if endFlag == 1 || b[1] == 0xFF {
                 flushJStyleType("spo2", &spo2Samples)
                 jsRequestNextHistory()
-            } else if jsPendingHistoryCmd == Self.JS_CMD_GET_SPO2 {
-                jsSendHistoryRequest(cmd: Self.JS_CMD_GET_SPO2, mode: 0x02)
+            } else if jsPendingHistoryCmd == cmd {
+                jsSendHistoryRequest(cmd: cmd, mode: 0x02)
             }
 
         case Self.JS_CMD_GET_TEMP:  // 0x62 (multi-record, 11 bytes each)
@@ -1272,10 +1280,43 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        // Colmi path: cmd 0x69 generic realtime
+        // Colmi path: cmd 0x69 generic realtime.
+        // Build 370: when "hr" is requested (default Medir Agora), fire ALL THREE
+        // streams simultaneously (HR + SpO2 + HRV) so a single 60s measurement
+        // window captures everything. Each stream needs a CONTINUE keep-alive
+        // every ~30s — schedule those too. Stop all at the end.
+        if type == "hr" {
+            sendRealtime(type: Self.RT_TYPE_HR)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.sendRealtime(type: Self.RT_TYPE_SPO2)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.sendRealtime(type: Self.RT_TYPE_HRV)
+            }
+            // Keep-alive at ~25s and ~50s mark
+            for offset in [25.0, 50.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + offset) { [weak self] in
+                    guard let self = self else { return }
+                    self.sendRealtimeContinue(type: Self.RT_TYPE_HR)
+                    self.sendRealtimeContinue(type: Self.RT_TYPE_SPO2)
+                    self.sendRealtimeContinue(type: Self.RT_TYPE_HRV)
+                }
+            }
+            // Stop at durationSec, then notify JS so the measuring UI can close
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(durationSec)) { [weak self] in
+                guard let self = self else { return }
+                self.sendRealtimeStop(type: Self.RT_TYPE_HR)
+                self.sendRealtimeStop(type: Self.RT_TYPE_SPO2)
+                self.sendRealtimeStop(type: Self.RT_TYPE_HRV)
+                self.notifyListeners("measurementEnded", data: ["type": "all", "vendor": "colmi"])
+            }
+            call.resolve(["started": true, "vendor": "colmi", "streams": ["hr", "spo2", "hrv"], "durationSec": durationSec])
+            return
+        }
+
+        // Single-stream fallback (caller pediu type específico)
         let subType: UInt8
         switch type {
-        case "hr":   subType = Self.RT_TYPE_HR
         case "spo2": subType = Self.RT_TYPE_SPO2
         case "hrv":  subType = Self.RT_TYPE_HRV
         default:
@@ -1283,7 +1324,11 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         sendRealtime(type: subType)
-        call.resolve(["started": true, "vendor": "colmi"])
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(durationSec)) { [weak self] in
+            self?.sendRealtimeStop(type: subType)
+            self?.notifyListeners("measurementEnded", data: ["type": type, "vendor": "colmi"])
+        }
+        call.resolve(["started": true, "vendor": "colmi", "type": type])
     }
 
     /// Start realtime stream for a single biomarker type (0x69 request).
