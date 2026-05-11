@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import Home from "./pages/Home";
 import InsightsScreen from "./screens/InsightsScreen";
 import InsightsIndexDetailScreen from "./screens/InsightsIndexDetailScreen";
+import DailyStateScreen from "./screens/DailyStateScreen";
+import YearStoryScreen from "./screens/YearStoryScreen";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -43,6 +45,8 @@ const AppRoutes = () => (
     <Route path="/reset-password" element={<ResetPassword />} />
     <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
     <Route path="/insights" element={<ProtectedRoute><InsightsScreen /></ProtectedRoute>} />
+    <Route path="/insights/daily-state" element={<ProtectedRoute><DailyStateScreen /></ProtectedRoute>} />
+    <Route path="/insights/year-story" element={<ProtectedRoute><YearStoryScreen /></ProtectedRoute>} />
     <Route path="/insights/:type" element={<ProtectedRoute><InsightsIndexDetailScreen /></ProtectedRoute>} />
     <Route path="/labs" element={<ProtectedRoute><Labs /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

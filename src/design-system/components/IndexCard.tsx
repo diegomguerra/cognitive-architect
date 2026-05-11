@@ -1,13 +1,15 @@
 import { bandTextClass, getBandLabel } from '../bands';
 
 type Props = {
-  label: string;          // "Energia", "Clareza", "Estabilidade"
-  value: number;          // 0-100
+  label: string;
+  value: number | null;
   onClick?: () => void;
 };
 
-/** Card de índice usado no grid 3-col da TodayScreen. */
+/** Card de índice com null-tolerance. */
 export function IndexCard({ label, value, onClick }: Props) {
+  const isNull = value === null;
+
   return (
     <button
       type="button"
@@ -18,13 +20,13 @@ export function IndexCard({ label, value, onClick }: Props) {
         {label}
       </div>
       <div
-        className="font-mono text-[34px] font-normal tracking-[-0.03em] leading-none mb-2 text-ds-ink0"
+        className={`font-mono text-[34px] font-normal tracking-[-0.03em] leading-none mb-2 ${isNull ? 'text-ds-ink3' : 'text-ds-ink0'}`}
         style={{ fontVariantNumeric: 'tabular-nums' }}
       >
-        {value}
+        {isNull ? '—' : value}
       </div>
-      <div className={`font-mono text-[9px] tracking-wide2 uppercase ${bandTextClass(value)}`}>
-        {getBandLabel(value)}
+      <div className={`font-mono text-[9px] tracking-wide2 uppercase ${isNull ? 'text-ds-ink3' : bandTextClass(value)}`}>
+        {isNull ? 'Sem dados' : getBandLabel(value)}
       </div>
     </button>
   );

@@ -16,7 +16,7 @@ import type { Json } from '@/integrations/supabase/types';
 import { VYRHealthBridge } from './healthkit-bridge';
 import type { HealthDataType, HealthSample } from '@capgo/capacitor-health';
 import { computeAndStoreState } from './vyr-recompute';
-import { computeStressLevelV4 } from './vyr-stress';
+import { computeStressLevelV4, computeStressV4 } from './vyr-stress';
 import { computeStateViaEdge } from './vyr-compute-client';
 
 // Types the @capgo/capacitor-health plugin actually supports
@@ -548,7 +548,10 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
   }
 
   // Stress cascade: HRV real → HRV derivado de FC → RHR+sono+RR → fallback 50
-  const stressLevel = computeStressLevelV4(avgHrv, {
+  // null-over-fake: se source === 'fallback' (sem nenhum sinal), grava null
+  // em vez de 50 — caso contrário polui o cálculo no Edge Function v12.
+  const stressResult = computeStressV4({
+    avgHrv,
     avgRhr: computedRhr,
     sleepHours: durationHours,
     sleepQuality: sleepQuality || undefined,
@@ -556,6 +559,7 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     skinTempDelta: latestSkinTemp ?? undefined,
     hrvIsReal,
   });
+  const stressLevel = stressResult.source === 'fallback' ? null : stressResult.level;
 
   const metrics = {
     hr_avg: avgHr ? Math.round(avgHr) : null,
@@ -566,8 +570,9 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     hrv_type: avgHrv ? (hrvIsReal ? 'sdnn' as const : 'rmssd_derived' as const) : null,
     hrv_source: avgHrv ? (hrvIsReal ? 'wearable' as const : 'derived_from_hr' as const) : null,
     stress_level: stressLevel,
-    sleep_duration_hours: Math.round(durationHours * 10) / 10,
-    sleep_quality: sleepQuality,
+    // null-over-fake: 0h de sono = sem leitura, não score zero
+    sleep_duration_hours: durationHours > 0 ? Math.round(durationHours * 10) / 10 : null,
+    sleep_quality: sleepQuality > 0 ? sleepQuality : null,
     steps: totalSteps,
     spo2: avgSpo2 ? Math.round(avgSpo2 * 10) / 10 : null,
     // F1b extended biomarkers
@@ -602,6 +607,22 @@ async function _syncHealthKitDataInternal(): Promise<boolean> {
     }
   } catch (e) {
     console.warn('[healthkit] merge read failed, using new metrics only:', e);
+  }
+
+  // Se todos os metrics são null (ex: usuário sem Apple Watch ou revogou
+  // permissões / desativou compartilhamento JStyle→Apple Health), NÃO escreve
+  // o row apple_health. Isso evita poluir ring_daily_data com fonte vazia que
+  // depois faz vyr-compute-state agregar nada e dar score zero.
+  // Decisão Diego 2026-05-10: pipeline JStyle→BLE→parse-vendor-raw é fonte da
+  // verdade quando o usuário não tem Apple Watch.
+  const hasAnyRealValue = Object.values(mergedMetrics).some(
+    (v) => v != null && v !== 0 && v !== '',
+  );
+  if (!hasAnyRealValue) {
+    console.info('[healthkit] no real Apple Health data — skipping upsert (BLE-only user)');
+    const nowIsoEarly = now.toISOString();
+    for (const dt of [...HEALTH_READ_TYPES, ...BRIDGE_READ_TYPES]) setLastSyncTimestamp(dt, nowIsoEarly);
+    return false;
   }
 
   const result = await retryOnAuthErrorLabeled(async () => {

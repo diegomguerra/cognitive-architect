@@ -88,6 +88,15 @@ export function useVYRStore() {
    */
   const refreshStateFromDB = useCallback(async () => {
     if (!userId) return;
+    // Reconcile Home com Insights: dispara vyr-compute-state v12 antes de ler.
+    // Garante que computed_states reflete o pipeline Phase 2.5 (mesmo cálculo
+    // que Insights faz). Silent on failure — fallback é cache antigo.
+    try {
+      await supabase.functions.invoke('vyr-compute-state', { body: { day: today } });
+    } catch (e) {
+      console.warn('[useVYRStore] vyr-compute-state invoke failed (silent):', e);
+    }
+
     let { data } = await supabase
       .from('computed_states')
       .select('day, score, level, pillars, phase, raw_input')

@@ -12,6 +12,8 @@ import BrainLogo from '@/components/BrainLogo';
 import { interpret } from '@/lib/vyr-interpreter';
 import { getActiveDosePhase } from '@/lib/vyr-engine';
 import { useVYRStore } from '@/hooks/useVYRStore';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 // Fase activa de dose — UMA fase por janela horária
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -107,10 +109,37 @@ function PillarCard({ name, value, description, index }: { name: string; value: 
 const Home = () => {
   const navigate = useNavigate();
   const store = useVYRStore();
+  const { user } = useAuth();
   const { state, hasData, userName, actionsTaken, sachetConfirmation, prediction, anomaly, engineMode, dataConfidence } = store;
   const [showCheckpoint, setShowCheckpoint] = useState(false);
+  const [lastComputedAt, setLastComputedAt] = useState<string | null>(null);
 
   const interpretation = useMemo(() => interpret(state), [state]);
+
+  // Última vez que vyr-compute-state escreveu — mostra "Atualizado em DD/MM HH:MM" abaixo do ring
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const today = new Date().toISOString().split('T')[0];
+      const { data } = await supabase
+        .from('computed_states')
+        .select('last_computed_at,updated_at')
+        .eq('user_id', user.id)
+        .eq('day', today)
+        .maybeSingle();
+      const ts = (data?.last_computed_at as string) ?? (data?.updated_at as string) ?? null;
+      if (!cancelled) setLastComputedAt(ts);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, state.score]);
+
+  const lastComputedLabel = useMemo(() => {
+    if (!lastComputedAt) return null;
+    const d = new Date(lastComputedAt);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }, [lastComputedAt]);
 
   // Delta (today vs yesterday)
   const delta = useMemo(() => {
@@ -178,6 +207,11 @@ const Home = () => {
             <span className={`text-xs ${delta > 0 ? 'text-vyr-positive' : delta < 0 ? 'text-vyr-caution' : 'text-vyr-text-muted'}`} style={{ fontWeight: 500 }}>
               {delta > 0 ? '+' : ''}{delta} pts vs ontem
             </span>
+          </div>
+        )}
+        {lastComputedLabel && (
+          <div className="font-mono text-[10px] tracking-wider text-[#667788] uppercase mt-2">
+            Atualizado em {lastComputedLabel}
           </div>
         )}
       </div>

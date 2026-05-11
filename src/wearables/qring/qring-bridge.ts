@@ -98,6 +98,22 @@ export interface QRingPluginInterface {
 
   enableRealtime(opts: { type: 'hr' | 'spo2' | 'hrv' }): Promise<{ started: boolean }>;
 
+  /** Configure auto-monitoring per biomarker. JStyle only.
+   * intervalMin=0 desativa (não dispara LED). Default intervals:
+   * hr=5min, spo2/temp/hrv=30min. */
+  setSensorAuto(opts: {
+    type: 'hr' | 'spo2' | 'temp' | 'hrv';
+    intervalMin: number;
+    enable: boolean;
+  }): Promise<{ type: string; intervalMin: number; enable: boolean }>;
+
+  /** Manual one-shot measurement (cmd 0x28). HR ou SpO2 apenas.
+   * durationSec mínimo 30s. */
+  measureNow(opts: {
+    type: 'hr' | 'spo2';
+    durationSec?: number;
+  }): Promise<{ type: string; durationSec: number; started: boolean }>;
+
   addListener(eventName: 'deviceFound', cb: (ev: QRingDeviceFoundEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'connected', cb: (ev: QRingConnectedEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'syncData', cb: (ev: QRingSyncDataEvent) => void): Promise<PluginListenerHandle>;

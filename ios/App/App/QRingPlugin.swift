@@ -36,6 +36,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "sync",            returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "enableRealtime",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "configureAutoHR", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setSensorAuto",   returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "measureNow",      returnType: CAPPluginReturnPromise),
     ]
 
     private static let LS_LAST_DEVICE_ID = "qring_last_device_id"
@@ -366,6 +368,69 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["enabled": enabled, "interval": interval])
     }
 
+    /// JS: setSensorAuto({ type: 'hr'|'spo2'|'temp'|'hrv', intervalMin: number, enable: bool })
+    /// Configura auto-monitoring de um biomarker no JStyle (cmd 0x2A).
+    /// HR=verde 5min, SpO2=vermelho 30min, Temp 30min, HRV=azul 30min.
+    @objc func setSensorAuto(_ call: CAPPluginCall) {
+        guard peripheral != nil, writeChar != nil else {
+            call.reject("NOT_CONNECTED"); return
+        }
+        let typeStr = (call.getString("type") ?? "").lowercased()
+        let intervalMin = call.getInt("intervalMin") ?? 30
+        let enable = call.getBool("enable") ?? true
+
+        let dataType: UInt8
+        switch typeStr {
+        case "hr":   dataType = 1
+        case "spo2": dataType = 2
+        case "temp": dataType = 3
+        case "hrv":  dataType = 4
+        default:
+            call.reject("INVALID_TYPE: \(typeStr) — use hr|spo2|temp|hrv"); return
+        }
+
+        if deviceVendor == .jstyle {
+            jsSendAutoMonitoring(dataType: dataType, intervalMin: enable ? intervalMin : 0)
+            // intervalMin=0 efetivamente desativa (anel não dispara)
+            call.resolve(["type": typeStr, "intervalMin": intervalMin, "enable": enable])
+        } else {
+            call.reject("NOT_JSTYLE: vendor=\(deviceVendor.rawValue)")
+        }
+    }
+
+    /// JS: measureNow({ type: 'hr'|'spo2', durationSec: number })
+    /// Dispara medição manual one-shot (cmd 0x28). dataType 2=HR, 3=SpO2.
+    /// Min duration 30s. Resultado vem via notification handler já wired.
+    @objc func measureNow(_ call: CAPPluginCall) {
+        guard peripheral != nil, writeChar != nil else {
+            call.reject("NOT_CONNECTED"); return
+        }
+        let typeStr = (call.getString("type") ?? "").lowercased()
+        let durationSec = max(30, call.getInt("durationSec") ?? 30)
+
+        let dataType: UInt8
+        switch typeStr {
+        case "hr":   dataType = 2  // SDK datatype
+        case "spo2": dataType = 3
+        default:
+            call.reject("INVALID_TYPE: only hr or spo2 supported (use setSensorAuto for temp/hrv)"); return
+        }
+
+        if deviceVendor == .jstyle {
+            var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
+            pkt[0] = Self.JS_CMD_MEASUREMENT
+            pkt[1] = dataType
+            pkt[2] = 0x01  // openFlag = start
+            pkt[4] = UInt8(durationSec & 0xFF)
+            pkt[5] = UInt8((durationSec >> 8) & 0xFF)
+            pkt[15] = checksum(pkt)
+            queueWrite(Data(pkt))
+            call.resolve(["type": typeStr, "durationSec": durationSec, "started": true])
+        } else {
+            call.reject("NOT_JSTYLE: vendor=\(deviceVendor.rawValue)")
+        }
+    }
+
     @objc func disconnect(_ call: CAPPluginCall) {
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
@@ -515,6 +580,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.asyncAfter(deadline: .now() + 32.0) { [weak self] in
             guard let self = self else { return }
             self.sendRealtimeStop(type: Self.RT_TYPE_HR)
+            self.snapshotForDerive()
             self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
             self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
             self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
@@ -607,6 +673,8 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             // Idempotent stop — covers the case where a Medir Agora session is
             // still running concurrently with sync end.
             self.jsStopPPGMeasurement(notify: false)
+            // Snapshot HR + RR for deriveBiomarkers BEFORE flush clears the arrays
+            self.snapshotForDerive()
             // Flush any remaining history samples that arrived after their FF marker
             self.flushJStyleType("hr", &self.hrSamples)
             self.flushJStyleType("hrv", &self.hrvSamples)
@@ -695,19 +763,30 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - JStyle Command Builders
 
+    /// Converte byte decimal pra BCD (binary-coded decimal). Ex: 26 → 0x26.
+    /// O anel JStyle X3/X5 armazena data/hora em BCD e devolve nos packets de
+    /// history nesse formato — se enviarmos decimal puro, o parser
+    /// `bcd(b[i])` no Edge Function calcula errado (ex: 26 dec = 0x1A → bcd
+    /// retorna 1*10+10=20 → year 2020). Confirmado 2026-05-10 via bytes
+    /// debug_raw do Diego (history packets com year=0x26 = 2026 correto).
+    private func toBCD(_ v: Int) -> UInt8 {
+        let clamped = max(0, min(99, v))
+        return UInt8(((clamped / 10) << 4) | (clamped % 10))
+    }
+
     private func jsSendSetTime() {
         let now = Date()
         let cal = Calendar(identifier: .gregorian)
         let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now)
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.JS_CMD_SET_TIME
-        pkt[1] = UInt8(max(0, (c.year ?? 2026) - 2000))
-        pkt[2] = UInt8(c.month ?? 1)
-        pkt[3] = UInt8(c.day ?? 1)
-        pkt[4] = UInt8(c.hour ?? 0)
-        pkt[5] = UInt8(c.minute ?? 0)
-        pkt[6] = UInt8(c.second ?? 0)
-        // b[7] = timezone offset (hours from UTC, signed)
+        pkt[1] = toBCD(max(0, (c.year ?? 2026) - 2000))
+        pkt[2] = toBCD(c.month ?? 1)
+        pkt[3] = toBCD(c.day ?? 1)
+        pkt[4] = toBCD(c.hour ?? 0)
+        pkt[5] = toBCD(c.minute ?? 0)
+        pkt[6] = toBCD(c.second ?? 0)
+        // b[7] = timezone offset (hours from UTC, signed) — não é BCD, é signed int
         let tzOffset = TimeZone.current.secondsFromGMT() / 3600
         pkt[7] = UInt8(bitPattern: Int8(tzOffset))
         pkt[15] = checksum(pkt)
@@ -728,20 +807,24 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         queueWrite(Data(pkt))
     }
 
-    /// Configure auto-monitoring on JStyle ring.
-    /// dataType: 1=HR, 2=SpO2, 3=Temp, 4=HRV
+    /// Configure auto-monitoring on JStyle ring (cmd 0x2A SetAutomaticMonitoring).
+    /// Layout correto (corrigido 2026-05-10): dataType vai em pkt[1], NÃO pkt[9].
+    /// Bug anterior: pkt[1]=0x01 fixo (enable) + dataType em pkt[9] fazia anel
+    /// interpretar pkt[1]=0x01 como dataType=1 (HR) em TODAS as 4 chamadas. Por isso
+    /// só LED verde acionava — vermelho (SpO2)/azul (HRV)/temp jamais foram ativados.
+    /// Per project_jstyle_cmd_bytes.md: layout `[0x2A, dataType, intervalMin, ...]`.
+    /// dataType: 1=HR (green), 2=SpO2 (red), 3=Temp, 4=HRV (blue).
     private func jsSendAutoMonitoring(dataType: UInt8, intervalMin: Int) {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = Self.JS_CMD_SET_AUTO
-        pkt[1] = 0x01  // enable
-        pkt[2] = 0     // startHour = 00:00
-        pkt[3] = 0     // startMin
-        pkt[4] = 23    // endHour = 23:59
-        pkt[5] = 59    // endMin
-        pkt[6] = 0x7F  // all days (bit0-6 = Sun-Sat)
-        pkt[7] = UInt8(intervalMin & 0xFF)  // intervalLo
-        pkt[8] = UInt8((intervalMin >> 8) & 0xFF) // intervalHi
-        pkt[9] = dataType
+        pkt[1] = dataType                              // 1=HR, 2=SpO2, 3=Temp, 4=HRV (CORRIGIDO)
+        pkt[2] = UInt8(intervalMin & 0xFF)             // intervalo em minutos
+        pkt[3] = 0x01                                  // enable flag
+        pkt[4] = toBCD(0)                              // startHour BCD
+        pkt[5] = toBCD(0)                              // startMin BCD
+        pkt[6] = toBCD(23)                             // endHour BCD
+        pkt[7] = toBCD(59)                             // endMin BCD
+        pkt[8] = 0x7F                                  // all days (bit0-6 = Sun-Sat)
         pkt[15] = checksum(pkt)
         queueWrite(Data(pkt))
     }
@@ -2166,17 +2249,27 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - Derived Biomarkers (RHR, Stress)
 
+    /// Snapshot HR values + RR intervals before flush clears the arrays.
+    private var deriveSavedHR: [Int] = []
+    private var deriveSavedRR: [Int] = []
+
+    private func snapshotForDerive() {
+        deriveSavedHR.removeAll()
+        deriveSavedRR.removeAll()
+        for s in hrSamples {
+            if let v = s["value"] as? Int, (30...220).contains(v) { deriveSavedHR.append(v) }
+        }
+        for s in realtimeHrSamples {
+            if let v = s["value"] as? Int, (30...220).contains(v) { deriveSavedHR.append(v) }
+        }
+        deriveSavedRR = realtimeRRIntervals
+    }
+
     private func deriveBiomarkers() {
         let now = nowMsUnique()
 
         // --- RHR: lowest 10th percentile of HR readings ---
-        var allHR: [Int] = []
-        for s in realtimeHrSamples {
-            if let v = s["value"] as? Int, (30...220).contains(v) { allHR.append(v) }
-        }
-        for s in hrSamples {
-            if let v = s["value"] as? Int, (30...220).contains(v) { allHR.append(v) }
-        }
+        let allHR = deriveSavedHR
         if !allHR.isEmpty {
             let sorted = allHR.sorted()
             let rhr: Int
@@ -2199,13 +2292,13 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         // --- Stress: derived from RMSSD of RR intervals ---
-        if realtimeRRIntervals.count >= 3 {
+        if deriveSavedRR.count >= 3 {
             var sumSqDiff: Double = 0
-            for i in 1..<realtimeRRIntervals.count {
-                let diff = Double(realtimeRRIntervals[i] - realtimeRRIntervals[i - 1])
+            for i in 1..<deriveSavedRR.count {
+                let diff = Double(deriveSavedRR[i] - deriveSavedRR[i - 1])
                 sumSqDiff += diff * diff
             }
-            let rmssd = sqrt(sumSqDiff / Double(realtimeRRIntervals.count - 1))
+            let rmssd = sqrt(sumSqDiff / Double(deriveSavedRR.count - 1))
             // Stress index: inverse of RMSSD (high RMSSD = low stress)
             let stressValue = Int(max(0, min(100, 100 - rmssd * 1.5)))
 
@@ -2585,6 +2678,20 @@ extension QRingPlugin: CBPeripheralDelegate {
                 "mac": id,
                 "name": peripheral.name ?? "QRing"
             ])
+
+            // SetDeviceTime no connect — desbloqueia parsing de history (cmd 0x54 etc).
+            // Sem isso, o anel mantém data interna desatualizada e history packets vêm
+            // com year inválido (rejeitados pelo isValidDate em parse-vendor-raw).
+            // BCD format aplicado em jsSendSetTime (corrigido 2026-05-10).
+            if self.deviceVendor == .jstyle {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.jsSendSetTime()
+                }
+            } else if self.deviceVendor == .colmi {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.sendSetTime()
+                }
+            }
         }
     }
 

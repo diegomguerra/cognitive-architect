@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useVYRStore } from '@/hooks/useVYRStore';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
+import { SensorTogglesSection } from '@/features/sensors/SensorTogglesSection';
 
 const SettingsPage = () => {
   const navigate = useNavigate();
@@ -152,6 +153,14 @@ const SettingsPage = () => {
               }}
             />
           </div>
+        </div>
+
+        {/* Ring Sensors — toggles + intervals + measure now */}
+        <div className="mt-2 mb-6">
+          <p className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-medium px-4 mb-2">
+            Sensores
+          </p>
+          <SensorTogglesSection />
         </div>
 
         {/* Notifications section */}

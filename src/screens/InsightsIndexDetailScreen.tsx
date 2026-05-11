@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
 import BottomNav from '@/components/BottomNav';
+import { AppHeader } from '@/design-system/components/AppHeader';
 import { HeroScore } from '@/design-system/components/HeroScore';
 import { EditorialBlock } from '@/design-system/components/EditorialBlock';
 import { ContributorRow } from '@/design-system/components/ContributorRow';
@@ -11,15 +11,6 @@ const TITLES: Record<IndexType, string> = {
   energia: 'ENERGIA',
   clareza: 'CLAREZA',
   estabilidade: 'ESTABILIDADE',
-};
-
-const BODIES: Record<IndexType, string> = {
-  energia:
-    'Mede prontidão física e bioenergética: FC repouso, sono, oxigenação e gasto energético do dia anterior.',
-  clareza:
-    'Mede recuperação cognitiva e equilíbrio autonômico: HRV, qualidade do sono, estresse e respiração.',
-  estabilidade:
-    'Mede consistência ao longo do tempo: tendência da HRV, regularidade circadiana, temperatura corporal.',
 };
 
 export default function InsightsIndexDetailScreen() {
@@ -33,9 +24,7 @@ export default function InsightsIndexDetailScreen() {
   if (!validType) {
     return (
       <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 pt-12">
-        <button onClick={() => nav('/insights')} className="text-ds-ink1 inline-flex items-center gap-2">
-          <ArrowLeft size={16} /> <span className="font-mono text-[11px] tracking-wide2 uppercase">Insights</span>
-        </button>
+        <AppHeader variant="detail" title="ERRO" onBack={() => nav('/insights')} />
         <p className="text-ds-ink1 text-sm mt-6">Tipo de índice inválido.</p>
         <BottomNav />
       </div>
@@ -53,34 +42,29 @@ export default function InsightsIndexDetailScreen() {
   if (error || !data) {
     return (
       <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 pt-12">
-        <p className="text-ds-ink1 text-sm">{error || 'Sem dados.'}</p>
+        <AppHeader variant="detail" title={TITLES[validType]} onBack={() => nav('/insights')} />
+        <p className="text-ds-ink1 text-sm mt-6">{error || 'Sem dados.'}</p>
         <BottomNav />
       </div>
     );
   }
 
   const score = data.pillars[validType];
-  const contributors = data.contributors[validType];
+  const contributors = data.contributors[validType] || [];
+  const editorial = data.editorial[validType];
 
   return (
     <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
-      <header className="px-4 pt-12 pb-2 flex justify-between items-center">
-        <button onClick={() => nav('/insights')} className="text-ds-ink1 hover:text-ds-ink0">
-          <ArrowLeft size={20} />
-        </button>
-        <span className="font-mono text-[11px] font-medium tracking-wide3 text-ds-ink0">
-          {TITLES[validType]}
-        </span>
-        <span className="w-5" />
+      <header className="px-4 pt-12">
+        <AppHeader variant="detail" title={TITLES[validType]} onBack={() => nav('/insights')} />
       </header>
 
       <main className="px-4 pt-4">
         <HeroScore label="" value={score} size="lg" />
 
-        <EditorialBlock
-          heading={`Eixo ${TITLES[validType].toLowerCase()}`}
-          body={BODIES[validType]}
-        />
+        {editorial.heading && (
+          <EditorialBlock heading={editorial.heading} body={editorial.body} />
+        )}
 
         <section className="px-1 pb-6">
           <h3
@@ -91,7 +75,7 @@ export default function InsightsIndexDetailScreen() {
           </h3>
           {contributors.length === 0 ? (
             <p className="text-sm text-ds-ink1 py-4">
-              Sem contribuidores disponíveis para este eixo nos dados atuais. Sincronize o anel para expandir a coleta.
+              Sem contribuidores disponíveis. Sincronize o anel para acumular dados.
             </p>
           ) : (
             contributors.map((c) => (
@@ -100,15 +84,18 @@ export default function InsightsIndexDetailScreen() {
                 name={c.name}
                 rawValue={c.rawValue}
                 score={c.score}
+                qualityNote={c.qualityNote}
               />
             ))
           )}
         </section>
 
-        <Sparkline7d
-          days={data.last7Days.map((d) => ({ label: d.d, score: d.score }))}
-          avg={data.last7Days.reduce((a, b) => a + b.score, 0) / data.last7Days.length}
-        />
+        {data.last7Days.length > 0 && (
+          <Sparkline7d
+            days={data.last7Days.map((d) => ({ label: d.d, score: d.score ?? 0 }))}
+            avg={data.last7Days.filter((d) => d.score != null).reduce((a, b) => a + (b.score as number), 0) / Math.max(1, data.last7Days.filter((d) => d.score != null).length)}
+          />
+        )}
       </main>
 
       <BottomNav />
