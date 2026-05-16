@@ -189,12 +189,28 @@ export function BiomarkersGrid() {
             rawNum: hrVals.length ? mean(hrVals) : null, unit: 'bpm',
             detail: hrVals.length ? `min ${Math.round(Math.min(...hrVals))} · max ${Math.round(Math.max(...hrVals))}` : undefined,
           }),
-          make(rhrRows, {
-            key: 'rhr', label: 'FC Repouso', Icon: HeartPulse,
-            value: rhrVals.length ? `${Math.round(mean(rhrVals)!)}` : '—',
-            rawNum: rhrVals.length ? mean(rhrVals) : null, unit: 'bpm',
-            detail: rhrVals.length ? `n=${rhrVals.length}` : undefined,
-          }),
+          (() => {
+            // Derive RHR from HR data: percentile 10 (lowest 10% = resting)
+            let rhrVal: number | null = null;
+            let rhrDetail: string | undefined;
+            let rhrSource = rhrRows;
+            if (rhrVals.length > 0) {
+              rhrVal = Math.round(mean(rhrVals)!);
+              rhrDetail = `n=${rhrVals.length}`;
+            } else if (hrVals.length >= 5) {
+              const sorted = [...hrVals].sort((a, b) => a - b);
+              const p10idx = Math.max(0, Math.floor(sorted.length * 0.1) - 1);
+              rhrVal = Math.round(sorted[p10idx]);
+              rhrDetail = `derivado de ${hrVals.length} HR`;
+              rhrSource = hrRows; // use hrRows for freshness
+            }
+            return make(rhrSource, {
+              key: 'rhr', label: 'FC Repouso', Icon: HeartPulse,
+              value: rhrVal != null ? `${rhrVal}` : '—',
+              rawNum: rhrVal, unit: 'bpm',
+              detail: rhrDetail,
+            });
+          })(),
           make(hrvRows, {
             key: 'hrv', label: 'HRV', Icon: Activity,
             value: hrvVals.length ? `${Math.round(hrvVals[0])}` : '—',
@@ -231,13 +247,28 @@ export function BiomarkersGrid() {
             unit: tempReading.isAverage ? '°C · média 7d' : '°C',
             detail: tempReading.isAverage ? `Sem leitura 24h · n=${tempRows.length}` : `pele · n=${tempRows.length}`,
           }),
-          make(stressRows, {
-            key: 'stress', label: 'Estresse', Icon: Brain,
-            value: stressReading.value != null ? `${Math.round(stressReading.value)}` : '—',
-            rawNum: stressReading.value,
-            unit: stressReading.isAverage ? 'média 7d' : '',
-            detail: stressReading.isAverage ? `Sem leitura 24h · n=${stressRows.length}` : `n=${stressRows.length}`,
-          }),
+          (() => {
+            // Derive stress from HRV: lower RMSSD = higher stress
+            let stressVal: number | null = stressReading.value != null ? Math.round(stressReading.value) : null;
+            let stressDetail = stressReading.isAverage ? `Sem leitura 24h · n=${stressRows.length}` : `n=${stressRows.length}`;
+            let stressUnit = stressReading.isAverage ? 'média 7d' : '';
+            let stressSource = stressRows;
+            if (stressVal == null && hrvVals.length >= 1) {
+              // Map RMSSD to stress: RMSSD ~20ms = high stress (80), ~80ms = low stress (20)
+              const avgRmssd = mean(hrvVals)!;
+              stressVal = Math.round(Math.max(0, Math.min(100, 100 - avgRmssd * 1.2)));
+              stressDetail = `derivado de HRV ${Math.round(avgRmssd)}ms`;
+              stressUnit = '';
+              stressSource = hrvRows;
+            }
+            return make(stressSource, {
+              key: 'stress', label: 'Estresse', Icon: Brain,
+              value: stressVal != null ? `${stressVal}` : '—',
+              rawNum: stressVal,
+              unit: stressUnit,
+              detail: stressDetail,
+            });
+          })(),
           make(stepsRows, {
             key: 'steps', label: 'Passos', Icon: Footprints,
             value: stepsTotal != null ? `${stepsTotal.toLocaleString('pt-BR')}` : '—',

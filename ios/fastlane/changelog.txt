@@ -1,7 +1,13 @@
-VYR 8.0(108) — Fix tela Integrações (build 105/106/107 quebrava)
+VYR 8.1(391) — Design System v1 + biomarcadores mais honestos
 
-A tela Integrações não abria nas builds 105, 106 e 107. Causa: ao remover Apple Health do código, sobrou uma referência ao componente <Heart> sem o import correspondente. O JS tentava criar componente undefined e a página inteira crashava em runtime sem erro visível.
+Novidades visuais
+- Tela Insights nova, no estilo Oura (Design System v1). Cards de biomarcadores reorganizados.
 
-Diagnóstico definitivo: import faltando, não bug do BLEDebugPanel.
+Correções de medições
+- FC Repouso (RHR): quando o anel só envia HR cru, derivamos o RHR a partir do percentil 10 do HR (estimativa mais confiável que mostrar "—").
+- HR Repouso: snapshot dos pacotes antes do flush, para que o pipeline de derivação receba os dados corretos.
+- SpO2: JStyle cmd 0x66 (Automatic) corrigido + Colmi com multi-stream realtime (HR/SpO2/Stress paralelos).
+- Estresse: mesma lógica de fallback do RHR — exibe última leitura ou média 7d, nunca "—" se há dado nas últimas 7d.
 
-Fix: re-importado o ícone. Tela de Integrações abre normalmente. Painel "Diagnóstico BLE" agora aparece logo abaixo do card do anel mostrando bytes brutos em tempo real.
+Sob o capô
+- CI/fastlane: sigh + update_code_signing_settings auto-fetch (uploads mais estáveis).
