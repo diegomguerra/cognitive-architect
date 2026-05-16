@@ -667,9 +667,19 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         // Realtime PPG/RR/PPI is now triggered via "Medir Agora" button → cmd 0x78
         // with native 1Hz keepalive timer (jsStartPPGMeasurement).
 
-        // Phase 6: Resolve (t+35s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 35.0) { [weak self] in
+        // Phase 6: Resolve (t+75s)
+        // 35→75s in build 404. With 7 history cmds × 12s per-step safety timer,
+        // worst case is 84s. Plus actual pagination time for HR backlog (Diego
+        // had 224 HR packets in 36h = many continuations). 35s was firing before
+        // queue reached temp/steps in the request order.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 75.0) { [weak self] in
             guard let self = self else { return }
+            // Cancel remaining history queue + timer so late responses don't
+            // leak into the next sync session.
+            self.jsHistoryStepTimer?.cancel()
+            self.jsHistoryStepTimer = nil
+            self.jsHistoryQueue.removeAll()
+            self.jsPendingHistoryCmd = 0
             // Idempotent stop — covers the case where a Medir Agora session is
             // still running concurrently with sync end.
             self.jsStopPPGMeasurement(notify: false)
@@ -753,11 +763,29 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Send a JStyle history request with pagination mode.
+    /// X3 SDK (libBleSDK.a disassembly 2026-05-16) shows ALL history GETs
+    /// embed a startDate in BCD at pkt[4..9] when mode != 0x99. The ring
+    /// tolerated zero-startDate for HR (0x54) / SpO2 (0x66) / Sleep (0x53)
+    /// but silently dropped Temp (0x62) / Steps (0x51) / HRV (0x56) — Diego
+    /// saw temp regress 2026-05-14, steps 2026-05-13. Encode last-7-days
+    /// startDate uniformly to match SDK behavior.
     private func jsSendHistoryRequest(cmd: UInt8, mode: UInt8) {
         var pkt = [UInt8](repeating: 0, count: Self.PACKET_SIZE)
         pkt[0] = cmd
-        pkt[1] = mode  // 0x00=start, 0x02=continue
+        pkt[1] = mode  // 0x00=start, 0x02=continue, 0x99=delete-all
+        if mode != 0x99 {
+            let startDate = Date(timeIntervalSinceNow: -7 * 24 * 3600)
+            let cal = Calendar(identifier: .gregorian)
+            let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: startDate)
+            pkt[4] = toBCD(max(0, (c.year ?? 2026) - 2000))
+            pkt[5] = toBCD(c.month ?? 1)
+            pkt[6] = toBCD(c.day ?? 1)
+            pkt[7] = toBCD(c.hour ?? 0)
+            pkt[8] = toBCD(c.minute ?? 0)
+            pkt[9] = toBCD(c.second ?? 0)
+        }
         pkt[15] = checksum(pkt)
+        NSLog("[QRing] JS history GET cmd=0x%02X mode=0x%02X bytes=%@", cmd, mode, pkt.map { String(format: "%02X", $0) }.joined())
         queueWrite(Data(pkt))
     }
 
