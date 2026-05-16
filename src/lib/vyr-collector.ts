@@ -1,20 +1,17 @@
 /**
- * vyr-collector.ts — Camada única de coleta de biomarcadores (F6)
+ * vyr-collector.ts — Camada única de coleta de biomarcadores.
  *
- * Detecta a plataforma e roteia para o provider correto:
- *   iOS     → Apple Health via VYRHealthBridge + @capgo/capacitor-health
- *   Android → Health Connect via AndroidHealthProvider
- *   Web     → noop (retorna false)
+ * Reescrito 2026-05-16: HealthKit removido. Toda coleta agora vem via BLE
+ * do anel (QRing/JStyle/Colmi). Web platform = no-op.
  *
  * Responsabilidades:
- *   — Verificar disponibilidade e permissões
- *   — Executar o sync completo (ring_daily_data + features + Edge Function)
+ *   — Verificar disponibilidade de BLE + presença de anel pareado
+ *   — Disparar sync QRing + recompute VYR state
  *   — Expor status de conexão de forma uniforme
- *
- * NÃO contém lógica de computação — apenas coleta e dispara o pipeline.
  */
 
-import { syncHealthKitData, requestHealthKitPermissions, isHealthKitAvailable, checkHealthKitPermissions } from './healthkit';
+import { runQRingSyncIfPaired, getLastPairedQRing } from '@/wearables/wearable.sync';
+import { computeAndStoreState } from './vyr-recompute';
 
 export type CollectorPlatform = 'ios' | 'android' | 'web';
 
@@ -34,10 +31,6 @@ function detectPlatform(): CollectorPlatform {
   return 'web';
 }
 
-/**
- * Retorna o status atual do collector — disponibilidade + permissões.
- * Usado pelo Home para exibir o banner de conexão.
- */
 export async function getCollectorStatus(): Promise<CollectorStatus> {
   const platform = detectPlatform();
 
@@ -45,32 +38,28 @@ export async function getCollectorStatus(): Promise<CollectorStatus> {
     return { platform, available: false, hasPermissions: false, lastSyncAt: null };
   }
 
-  const available = await isHealthKitAvailable();
-  const hasPermissions = available ? await checkHealthKitPermissions() : false;
+  // Anel pareado = "available". BLE permission é granted no momento da conexão
+  // via RingPairingFlow, então hasPermissions reflete presença do device.
+  const paired = !!getLastPairedQRing();
   const lastSyncAt = localStorage.getItem('vyr.collector.lastSync');
 
-  return { platform, available, hasPermissions, lastSyncAt };
+  return { platform, available: true, hasPermissions: paired, lastSyncAt };
 }
 
 /**
- * Solicita permissões de saúde ao usuário.
- * Retorna true se permissões foram concedidas.
+ * requestCollectorPermissions — pós HealthKit removal.
+ * BLE permissions são pedidas implícitamente no RingPairingFlow. Aqui é no-op
+ * que retorna true se anel já pareado, false se não.
  */
 export async function requestCollectorPermissions(): Promise<boolean> {
   const platform = detectPlatform();
   if (platform === 'web') return false;
-  return requestHealthKitPermissions();
+  return !!getLastPairedQRing();
 }
 
 /**
- * Executa a coleta completa de biomarcadores para hoje.
- *
- * Internamente:
- *   1. syncHealthKitData() — lê wearable, salva ring_daily_data
- *   2. computeAndStoreFeatures() — calcula as 8 features derivadas (chamado dentro do sync)
- *   3. computeStateViaEdge() — Edge Function calcula score v4 server-side (chamado dentro do sync)
- *
- * @returns true se sync foi bem-sucedido
+ * Executa coleta completa de biomarcadores. Pós HealthKit removal:
+ * roda QRing sync + recompute via vyr-compute-state edge function.
  */
 export async function collect(): Promise<boolean> {
   const platform = detectPlatform();
@@ -79,25 +68,19 @@ export async function collect(): Promise<boolean> {
     return false;
   }
 
-  const available = await isHealthKitAvailable();
-  if (!available) {
-    console.warn('[vyr-collector] Health middleware not available');
-    return false;
-  }
+  const summary = await runQRingSyncIfPaired().catch(() => ({ ran: false }));
+  try { await computeAndStoreState(); } catch {}
 
-  const ok = await syncHealthKitData();
-
-  if (ok) {
+  if (summary.ran) {
     localStorage.setItem('vyr.collector.lastSync', new Date().toISOString());
-    console.info('[vyr-collector] Collect complete —', platform);
+    console.info('[vyr-collector] Collect complete —', platform, summary);
   }
 
-  return ok;
+  return summary.ran;
 }
 
 /**
  * Retorna quantos dias completos de dados o usuário tem.
- * Usado para determinar o modo do engine (bootstrap / adaptive / ml_ready).
  * Lê de computed_states via Supabase.
  */
 export async function getDataDays(userId: string): Promise<number> {

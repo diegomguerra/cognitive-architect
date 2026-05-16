@@ -118,7 +118,7 @@ const SettingsPage = () => {
               <span className="text-sm text-foreground">Wearable</span>
               <p className="text-[10px] text-muted-foreground">
                 {isWearableConnected
-                  ? `${wearableConnection?.provider === 'apple_health' ? 'Apple Health' : wearableConnection?.provider} · ${lastSync ? `Sync: ${lastSync}` : 'Nunca sincronizado'}`
+                  ? `${wearableConnection?.provider ?? 'Anel'} · ${lastSync ? `Sync: ${lastSync}` : 'Nunca sincronizado'}`
                   : 'Nenhum conectado'}
               </p>
             </div>

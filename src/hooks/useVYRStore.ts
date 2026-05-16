@@ -6,7 +6,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { requireValidUserId, retryOnAuthErrorLabeled } from '@/lib/auth-session';
 import { getCurrentPhase, computeScore, getLevel, getLimitingFactor } from '@/lib/vyr-engine';
 import type { VYRState, PillarScore } from '@/lib/vyr-engine';
-import { enableHealthKitBackgroundSync, isHealthKitAvailable, requestHealthKitPermissions, runIncrementalHealthSync } from '@/lib/healthkit';
+// HealthKit removido 2026-05-16 — imports stub mantidos só pra compat de symbols.
+// As funções abaixo agora retornam false/no-op (ver src/lib/healthkit.ts).
 import { computeAndStoreState } from '@/lib/vyr-recompute';
 import { loadTomorrowPrediction, loadTodayAnomaly } from '@/lib/vyr-compute-client';
 import type { VYRPrediction, VYRAnomaly } from '@/lib/vyr-compute-client';
@@ -143,66 +144,13 @@ export function useVYRStore() {
   }, [userId, today]);
 
   /**
-   * Auto-connect to Apple Health without user interaction.
-   * Requests HealthKit permissions, saves integration, enables background sync,
-   * and triggers first sync. Runs silently — no error toasts.
+   * autoConnect — HEALTHKIT REMOVIDO 2026-05-16. Função vira no-op.
+   * VYR não inicia mais Apple Health automaticamente. Conexão de wearable
+   * agora se dá exclusivamente via RingPairingFlow (BLE QRing/JStyle).
    */
-  const autoConnect = useCallback(async (uid: string) => {
-    try {
-      const available = await isHealthKitAvailable();
-      if (!available) return;
-
-      const granted = await requestHealthKitPermissions();
-      if (!granted) return;
-
-      const scopes = ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'];
-
-      // Surface partial HealthKit grants: if any scope is sharingDenied we
-      // still proceed (user may have granted most), but log the denied types
-      // so the UI can prompt for re-auth later.
-      try {
-        const { VYRHealthBridge } = await import('@/lib/healthkit-bridge');
-        const { statuses } = await VYRHealthBridge.getAuthorizationStatuses({ types: scopes });
-        const denied = Object.entries(statuses || {})
-          .filter(([, s]) => s === 'sharingDenied')
-          .map(([t]) => t);
-        if (denied.length > 0) {
-          console.warn('[useVYRStore] HealthKit types denied by user:', denied);
-        }
-      } catch (e) {
-        console.warn('[useVYRStore] getAuthorizationStatuses failed:', e);
-      }
-
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('user_integrations').upsert({
-          user_id: uid,
-          provider: 'apple_health',
-          status: 'active',
-          scopes,
-        }, { onConflict: 'user_id,provider' } as any).select();
-        return result;
-      }, { table: 'user_integrations', operation: 'upsert' });
-
-      await enableHealthKitBackgroundSync();
-
-      const syncOk = await runIncrementalHealthSync('manual');
-
-      setConnectionActive(true);
-      setWearableConnection({
-        provider: 'apple_health',
-        status: 'active',
-        lastSyncAt: syncOk ? new Date().toISOString() : null,
-        scopes,
-      });
-
-      console.info('[useVYRStore] Auto-connected to Apple Health');
-
-      // Reload VYR state now that sync + compute have run
-      await refreshStateFromDB();
-    } catch (e) {
-      console.warn('[useVYRStore] Auto-connect failed (silent):', e);
-    }
-  }, [refreshStateFromDB]);
+  const autoConnect = useCallback(async (_uid: string) => {
+    // intentional no-op
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -217,8 +165,10 @@ export function useVYRStore() {
         .eq('user_id', userId).eq('day', today),
       supabase.from('daily_reviews').select('id, day, focus_score, clarity_score, energy_score, mood_score, notes')
         .eq('user_id', userId).order('day', { ascending: false }).limit(7),
+      // Wearable integration: anel BLE (qring/jstyle/colmi). Apple Health
+      // ficou no banco como legacy mas não é mais exibido (2026-05-16).
       supabase.from('user_integrations').select('provider, status, last_sync_at, scopes')
-        .eq('user_id', userId).eq('provider', 'apple_health').maybeSingle(),
+        .eq('user_id', userId).in('status', ['active', 'connected']).neq('provider', 'apple_health').maybeSingle(),
       supabase.from('participantes').select('nome_publico, onboarding_completo')
         .eq('user_id', userId).maybeSingle(),
     ]);
@@ -330,11 +280,11 @@ export function useVYRStore() {
         console.info('[useVYRStore] Integration is disconnected, waiting for manual reconnect');
       }
     } else if (onboardingDone) {
-      // No integration exists at all — first time user, auto-connect
-      // (only after onboarding completed, never before)
-      autoConnect(userId);
+      // Sem integração — primeiro uso. Antes auto-conectava Apple Health;
+      // removido em 2026-05-16. Usuário pareia anel via RingPairingFlow.
+      console.info('[useVYRStore] No wearable integration — user must pair ring via UI');
     } else {
-      console.info('[useVYRStore] Skipping auto-connect: onboarding not completed');
+      console.info('[useVYRStore] Skipping: onboarding not completed');
     }
 
     // Name
@@ -423,33 +373,15 @@ export function useVYRStore() {
     await logAction(targetPhase, { transition: true });
   }, [logAction]);
 
+  /**
+   * connectWearable — pós HealthKit removal (2026-05-16).
+   * Antes pedia permissão HealthKit + criava row apple_health.
+   * Agora delega pareamento ao RingPairingFlow (componente UI dedicado para BLE).
+   * Mantém o symbol exportado pra não quebrar Settings.tsx.
+   */
   const connectWearable = useCallback(async () => {
-    const available = await isHealthKitAvailable();
-    if (!available) return false;
-    const ok = await requestHealthKitPermissions();
-    if (ok) {
-      const uid = await requireValidUserId();
-      await retryOnAuthErrorLabeled(async () => {
-        const result = await supabase.from('user_integrations').upsert({
-          user_id: uid,
-          provider: 'apple_health',
-          status: 'active',
-          scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
-        }, { onConflict: 'user_id,provider' } as any).select();
-        return result;
-      }, { table: 'user_integrations', operation: 'upsert' });
-      await enableHealthKitBackgroundSync();
-      // Trigger first sync immediately after connecting (also computes VYR state)
-      const syncOk = await runIncrementalHealthSync('manual');
-      setConnectionActive(true);
-      setWearableConnection({
-        provider: 'apple_health',
-        status: 'active',
-        lastSyncAt: syncOk ? new Date().toISOString() : null,
-        scopes: ['heartRate', 'restingHeartRate', 'heartRateVariability', 'sleep', 'steps', 'oxygenSaturation', 'bodyTemperature', 'bloodPressureSystolic', 'bloodPressureDiastolic', 'vo2Max', 'activeEnergyBurned'],
-      });
-    }
-    return ok;
+    console.info('[useVYRStore] connectWearable: route to RingPairingFlow UI');
+    return false;
   }, []);
 
   const disconnectWearable = useCallback(async () => {
@@ -458,7 +390,7 @@ export function useVYRStore() {
       const result = await supabase.from('user_integrations')
         .update({ status: 'disconnected' })
         .eq('user_id', uid)
-        .eq('provider', 'apple_health')
+        .in('status', ['active', 'connected'])
         .select();
       return result;
     }, { table: 'user_integrations', operation: 'update' });
@@ -467,7 +399,10 @@ export function useVYRStore() {
   }, []);
 
   const syncWearable = useCallback(async () => {
-    const ok = await runIncrementalHealthSync('manual');
+    // QRing sync (HealthKit removido 2026-05-16)
+    const { runQRingSyncIfPaired } = await import('@/wearables/wearable.sync');
+    const summary = await runQRingSyncIfPaired().catch(() => ({ ran: false }));
+    const ok = summary.ran;
     if (ok) {
       setWearableConnection((prev) => prev ? { ...prev, lastSyncAt: new Date().toISOString() } : prev);
       await loadData();

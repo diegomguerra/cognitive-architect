@@ -9,7 +9,8 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/integrations/supabase/client';
-import { syncHealthKitData } from '@/lib/healthkit';
+import { runQRingSyncIfPaired } from '@/wearables/wearable.sync';
+import { computeAndStoreState } from '@/lib/vyr-recompute';
 
 let pushListenersBound = false;
 
@@ -90,7 +91,10 @@ export function setupPushSyncHandler(): void {
         .eq('id', commandId);
 
       try {
-        const ok = await syncHealthKitData();
+        // QRing-only após remoção do HealthKit (2026-05-16). Sincroniza anel e recompute.
+        const summary = await runQRingSyncIfPaired().catch(() => ({ ran: false }));
+        try { await computeAndStoreState(); } catch {}
+        const ok = summary.ran;
 
         await supabase
           .from('sync_commands')
@@ -99,8 +103,8 @@ export function setupPushSyncHandler(): void {
             updated_at: new Date().toISOString(),
             completed_at: new Date().toISOString(),
             result: ok
-              ? { synced_at: new Date().toISOString(), source: 'apple_health', trigger: 'push' }
-              : { error: 'syncHealthKitData returned false', trigger: 'push' },
+              ? { synced_at: new Date().toISOString(), source: 'qring_ble', trigger: 'push', qring: summary }
+              : { error: 'qring sync did not run', trigger: 'push' },
           })
           .eq('id', commandId);
 
@@ -124,7 +128,7 @@ export function setupPushSyncHandler(): void {
   PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
     console.info('[push-sync] Push action performed:', action.notification.data);
     if (action.notification.data?.type === 'sync_command') {
-      void syncHealthKitData();
+      void runQRingSyncIfPaired();
     }
   });
 

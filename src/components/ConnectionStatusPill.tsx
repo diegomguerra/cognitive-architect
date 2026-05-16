@@ -9,6 +9,13 @@ interface WearableInfo {
   lastSyncAt: string | null;
 }
 
+const RING_LABEL: Record<string, string> = {
+  qring: 'QRing',
+  qring_ble: 'QRing',
+  jstyle: 'JStyle',
+  colmi: 'Colmi',
+};
+
 function formatSyncTime(iso: string | null): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
@@ -28,19 +35,22 @@ const ConnectionStatusPill = () => {
     if (!session?.user?.id) return;
 
     const fetchStatus = async () => {
-      const { data } = await supabase
-        .from('user_integrations')
-        .select('provider, status, last_sync_at')
+      // 2026-05-16: anel BLE não cria row em user_integrations. Lê de `devices`
+      // (tabela populada no pareamento BLE) que reflete o anel pareado real.
+      const { data: device } = await supabase
+        .from('devices')
+        .select('vendor, model, last_seen_at')
         .eq('user_id', session.user.id)
-        .in('status', ['active', 'connected'])
+        .order('last_seen_at', { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle();
 
-      if (data) {
+      if (device) {
+        const label = RING_LABEL[device.vendor] ?? device.vendor;
         setWearable({
-          provider: data.provider === 'apple_health' ? 'Apple Health' : data.provider,
-          status: data.status,
-          lastSyncAt: data.last_sync_at,
+          provider: device.model ? `${label} ${device.model}` : label,
+          status: 'active',
+          lastSyncAt: device.last_seen_at,
         });
       }
     };

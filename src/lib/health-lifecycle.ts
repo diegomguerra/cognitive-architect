@@ -1,16 +1,20 @@
 /**
- * Health Lifecycle Manager
+ * Health Lifecycle Manager — Pós HealthKit removal (2026-05-16).
  *
- * FIX P1: Connection state (connectionActive, lastAutoSync) now persisted
- * via VYRHealthBridge.saveConnectionState() → UserDefaults on the native side.
- * localStorage is used only as a fallback for web/dev builds.
+ * Antes: orquestrava HealthKit sync + QRing + recompute.
+ * Agora: QRing-only. HealthKit foi descontinuado do client; dados crus
+ * vêm exclusivamente do anel via parse-vendor-raw no Supabase.
  *
- * This fixes the TestFlight public link issue where WKWebView container reset
- * erased localStorage, causing the app to "forget" the HealthKit connection.
+ * Funções preservadas:
+ *  - bootstrapHealthSync: QRing sync se houver anel pareado + recompute state
+ *  - setupAppLifecycleListeners: resume/pause hooks
+ *  - setConnectionActive / isConnectionActive: persistência via localStorage
+ *  - startSyncCommandListener / handleSyncCommand: admin-triggered sync via Realtime
+ *
+ * Funções removidas: enableHealthKitBackgroundSync, syncHealthKitData,
+ * runIncrementalHealthSync (todas viraram no-ops em [[healthkit.ts]]).
  */
 
-import { VYRHealthBridge } from './healthkit-bridge';
-import { enableHealthKitBackgroundSync, isHealthKitAvailable, runIncrementalHealthSync, syncHealthKitData } from './healthkit';
 import { computeAndStoreState } from './vyr-recompute';
 import { registerPushToken, setupPushSyncHandler, unregisterPushToken } from './push-sync';
 import { runQRingSyncIfPaired } from '@/wearables/wearable.sync';
@@ -25,37 +29,14 @@ let lifecycleListenersBound = false;
 let bootstrapInProgress = false;
 let syncCommandChannel: RealtimeChannel | null = null;
 
-const isNativePlatform = (): boolean =>
-  !!(window as any).Capacitor?.isNativePlatform?.();
-
-/**
- * FIX P1: Load connection state from UserDefaults (native) or localStorage (web).
- */
 async function loadNativeConnectionState(): Promise<{ active: boolean; lastSync: string | null }> {
-  if (isNativePlatform()) {
-    try {
-      return await VYRHealthBridge.loadConnectionState();
-    } catch {
-      // Bridge unavailable — fall through to localStorage
-    }
-  }
   return {
     active: localStorage.getItem(LS_ACTIVE_KEY) === 'true',
     lastSync: localStorage.getItem(LS_LAST_SYNC_KEY),
   };
 }
 
-/**
- * FIX P1: Save connection state to UserDefaults (native) and localStorage (web).
- */
 async function saveNativeConnectionState(active: boolean, lastSync?: string): Promise<void> {
-  if (isNativePlatform()) {
-    try {
-      await VYRHealthBridge.saveConnectionState({ active, lastSync });
-    } catch {
-      // Fall through to localStorage
-    }
-  }
   if (active) {
     localStorage.setItem(LS_ACTIVE_KEY, 'true');
     if (lastSync) localStorage.setItem(LS_LAST_SYNC_KEY, lastSync);
@@ -73,30 +54,20 @@ async function shouldAutoSync(): Promise<boolean> {
 
 async function markAutoSynced(): Promise<void> {
   const now = String(Date.now());
-  // Persist timestamp alongside active flag
   const { active } = await loadNativeConnectionState();
   await saveNativeConnectionState(active, now);
 }
 
 /**
- * Bootstrap health sync for an authenticated user with an active connection.
- * Idempotent: safe to call multiple times. Debounces concurrent calls.
+ * Bootstrap sync para usuário autenticado. QRing-only.
+ * Sempre tenta recomputar o state (mesmo sem sync — pode haver ring data
+ * acumulada do dia anterior). Idempotente, debounce concorrente.
  */
 export async function bootstrapHealthSync(): Promise<boolean> {
   if (bootstrapInProgress) return false;
   bootstrapInProgress = true;
-
   try {
-    const available = await isHealthKitAvailable();
-    if (!available) {
-      try { await computeAndStoreState(); } catch {}
-      return false;
-    }
-
-    // FIX P5 (via native side): registerObserverQueries is idempotent — safe to call on resume
-    await enableHealthKitBackgroundSync();
-
-    // Register push token for background sync via admin dashboard
+    // Push token + sync handler (admin-triggered)
     const session = await supabase.auth.getSession();
     const uid = session.data?.session?.user?.id;
     if (uid) {
@@ -105,10 +76,11 @@ export async function bootstrapHealthSync(): Promise<boolean> {
     }
 
     if (await shouldAutoSync()) {
-      console.info('[health-lifecycle] Auto-sync triggered');
-      const ok = await runIncrementalHealthSync('manual');
-      if (ok) await markAutoSynced();
-      return ok;
+      console.info('[health-lifecycle] Auto-sync triggered (QRing only)');
+      const summary = await runQRingSyncIfPaired().catch(() => ({ ran: false }));
+      if (summary.ran) await markAutoSynced();
+      try { await computeAndStoreState(); } catch (e) { console.warn('[health-lifecycle] recompute failed:', e); }
+      return summary.ran;
     }
 
     console.info('[health-lifecycle] Skipping auto-sync (throttled), ensuring state computed');
@@ -123,8 +95,7 @@ export async function bootstrapHealthSync(): Promise<boolean> {
 }
 
 /**
- * Set up Capacitor app lifecycle listeners (resume/pause).
- * Only binds once — safe to call multiple times.
+ * Capacitor app lifecycle listeners (resume/pause). Idempotente.
  */
 export function setupAppLifecycleListeners(onSyncComplete?: () => void): void {
   if (lifecycleListenersBound) return;
@@ -133,21 +104,20 @@ export function setupAppLifecycleListeners(onSyncComplete?: () => void): void {
   import('@capacitor/app')
     .then(({ App }) => {
       App.addListener('resume', async () => {
-        console.info('[health-lifecycle] App resumed — checking health sync');
-        // FIX P1: read active flag from UserDefaults, not localStorage
+        console.info('[health-lifecycle] App resumed');
         const { active: wasActive } = await loadNativeConnectionState();
         if (wasActive) {
           const ok = await bootstrapHealthSync();
           if (ok && onSyncComplete) onSyncComplete();
         }
-        // Drain workaround (2026-04-26): the official QRing/Colmi app drains
-        // the ring's storage to Apple Health on every sync, leaving VYR's BLE
-        // path empty. Foreground-trigger BLE sync to catch ring data before
-        // the official app drains it next. Best-effort, silent on no-paired.
+        // Drain workaround: o app oficial QRing/Colmi drena o anel pro Apple Health
+        // a cada sync, deixando nosso BLE vazio. Foreground-trigger QRing pra pegar
+        // dados antes que o app oficial drene. Best-effort.
         try {
           const summary = await runQRingSyncIfPaired();
           if (summary.ran) {
             console.info('[health-lifecycle] foreground QRing sync:', summary);
+            if (onSyncComplete) onSyncComplete();
           }
         } catch (e) {
           console.warn('[health-lifecycle] foreground QRing sync threw (non-fatal):', e);
@@ -165,10 +135,6 @@ export function setupAppLifecycleListeners(onSyncComplete?: () => void): void {
     });
 }
 
-/**
- * Mark the health connection as active. Persists to UserDefaults (native) + localStorage.
- * On deactivation, also deactivates push token.
- */
 export async function setConnectionActive(active: boolean): Promise<void> {
   await saveNativeConnectionState(active, active ? undefined : undefined);
   if (!active) {
@@ -180,33 +146,24 @@ export async function setConnectionActive(active: boolean): Promise<void> {
   }
 }
 
-/**
- * Check if the health connection was previously active.
- * FIX P1: reads from UserDefaults via native bridge, not localStorage.
- */
 export async function isConnectionActive(): Promise<boolean> {
   const { active } = await loadNativeConnectionState();
   return active;
 }
 
 /**
- * Handle a remote sync command from the admin dashboard.
- * Triggers a full sync and updates the command status in Supabase.
+ * Handle remote sync command (admin dashboard via sync_commands realtime).
+ * QRing-only — HealthKit removido. Source = 'qring_ble'.
  */
 async function handleSyncCommand(commandId: string, command: string): Promise<void> {
   console.info('[health-lifecycle] Received remote sync command:', command, '(id:', commandId, ')');
 
-  // Mark as received
   await supabase
     .from('sync_commands')
     .update({ status: 'received', updated_at: new Date().toISOString() })
     .eq('id', commandId);
 
   try {
-    // 1. HealthKit sync — primary source on iOS
-    const healthKitOk = await syncHealthKitData();
-
-    // 2. QRing BLE sync — best-effort, only runs if a ring is paired
     let qringSummary: Awaited<ReturnType<typeof runQRingSyncIfPaired>> = { ran: false };
     try {
       qringSummary = await runQRingSyncIfPaired();
@@ -216,7 +173,6 @@ async function handleSyncCommand(commandId: string, command: string): Promise<vo
       qringSummary = { ran: true, reason: 'exception', inserted: 0, duplicates: 0, errors: 1 };
     }
 
-    // 3. Refresh VYR state (compute from ring_daily_data + biomarker_samples)
     let vyrRecomputed = false;
     try {
       await computeAndStoreState();
@@ -225,7 +181,7 @@ async function handleSyncCommand(commandId: string, command: string): Promise<vo
       console.warn('[health-lifecycle] VYR recompute threw (non-fatal):', e);
     }
 
-    const overallOk = healthKitOk; // HealthKit is the primary contract for "success"
+    const overallOk = qringSummary.ran;
 
     await supabase
       .from('sync_commands')
@@ -235,8 +191,7 @@ async function handleSyncCommand(commandId: string, command: string): Promise<vo
         completed_at: new Date().toISOString(),
         result: {
           synced_at: new Date().toISOString(),
-          source: 'apple_health',
-          healthkit_ok: healthKitOk,
+          source: 'qring_ble',
           qring: qringSummary,
           vyr_recomputed: vyrRecomputed,
         },
@@ -259,12 +214,7 @@ async function handleSyncCommand(commandId: string, command: string): Promise<vo
   }
 }
 
-/**
- * Subscribe to sync_commands via Supabase Realtime for admin-triggered syncs.
- * Also checks for any pending commands on startup.
- */
 export function startSyncCommandListener(userId: string): void {
-  // Clean up previous channel
   stopSyncCommandListener();
 
   syncCommandChannel = supabase
@@ -288,9 +238,6 @@ export function startSyncCommandListener(userId: string): void {
       console.info('[health-lifecycle] sync_commands realtime:', status);
     });
 
-  // Check for pending commands on startup — drains ALL pending/sent commands
-  // (previously only drained 1). This is important for users who opened the
-  // app after multiple admin-triggered syncs queued up.
   void (async () => {
     try {
       const { data: pending } = await supabase
@@ -298,13 +245,12 @@ export function startSyncCommandListener(userId: string): void {
         .select('id, command')
         .eq('user_id', userId)
         .in('status', ['pending', 'sent'])
-        .order('created_at', { ascending: true }) // oldest first
+        .order('created_at', { ascending: true })
         .limit(20);
 
       if (pending && pending.length > 0) {
         console.info('[health-lifecycle] Draining', pending.length, 'pending sync command(s) on mount');
         for (const cmd of pending) {
-          // sequential await — let each sync finish before next
           await handleSyncCommand(cmd.id, cmd.command);
         }
       }
@@ -314,9 +260,6 @@ export function startSyncCommandListener(userId: string): void {
   })();
 }
 
-/**
- * Unsubscribe from sync_commands Realtime channel.
- */
 export function stopSyncCommandListener(): void {
   if (syncCommandChannel) {
     supabase.removeChannel(syncCommandChannel);

@@ -1,13 +1,18 @@
-VYR 8.1(391) — Design System v1 + biomarcadores mais honestos
+VYR 8.1(392) — Dados honestos + Apple Health removido
 
-Novidades visuais
-- Tela Insights nova, no estilo Oura (Design System v1). Cards de biomarcadores reorganizados.
+Mudanças visíveis
+- Removida toda dependência do Apple Health. Agora todos os dados vêm direto do anel (parse-vendor-raw via Supabase). Dados antigos do Apple Health permanecem no banco apenas para análise.
+- Tela Insights · Biomarcadores: agora mostra a data do dia âncora ("Biomarcadores · DD/MM") + contador "N/10 hoje". Cada card mostra "Última: DD/MM HH:MM".
+- Cards com dado de dia anterior recebem badge discreto "anterior" no canto (sem desbotar).
+- Card de Sono: agora soma só a noite que terminou no dia anchor (janela 18h→12h), nunca acumula múltiplas noites. Breakdown REM/Leve/Profundo com supressão de REM quando zero.
+- Pill verde na Home agora reflete o anel real pareado via BLE (JStyle X5 ou Colmi R09), não mais Apple Health.
 
-Correções de medições
-- FC Repouso (RHR): quando o anel só envia HR cru, derivamos o RHR a partir do percentil 10 do HR (estimativa mais confiável que mostrar "—").
-- HR Repouso: snapshot dos pacotes antes do flush, para que o pipeline de derivação receba os dados corretos.
-- SpO2: JStyle cmd 0x66 (Automatic) corrigido + Colmi com multi-stream realtime (HR/SpO2/Stress paralelos).
-- Estresse: mesma lógica de fallback do RHR — exibe última leitura ou média 7d, nunca "—" se há dado nas últimas 7d.
+Score (server-side)
+- vyr-compute-state v17: restaurado o bloco data_confidence em raw_input. Card de Clareza/Energia/Estabilidade agora exibe nível de confiança ("alta", "parcial", "calibrando") quando há dados parciais.
+- Stress derivado de RMSSD quando o anel não envia stress_level direto.
+- Limiar de IBI reduzido (10 amostras + 0.4 qualidade) para usar leituras curtas do JStyle/Colmi.
 
-Sob o capô
-- CI/fastlane: sigh + update_code_signing_settings auto-fetch (uploads mais estáveis).
+Bugs conhecidos (próximas builds)
+- parse-vendor-raw ainda extrai apenas HR/SpO2/Sono/bateria dos pacotes do JStyle X5 (HRV/RR/Stress/Passos pendentes).
+- Colmi R09: sleep, SpO2 e steps ainda não chegam via BLE (cmds pendentes no plugin).
+- Botão "Medir Agora" em SpO2/FC dá erro com anel Colmi (vendor mismatch).
