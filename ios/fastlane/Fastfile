@@ -140,10 +140,42 @@ platform :ios do
 
     cocoapods(podfile: "App/Podfile", try_repo_update_on_error: true)
 
-    # Download/install the App Store provisioning profile from App Store
-    # Connect via API key. Avoids the "No profile for team WNB4G5T7Z6
-    # matching VYR App Store Build346" failure when the Mac mini's
-    # ~/Library/MobileDevice/Provisioning Profiles/ is missing the file.
+    # Keychain dedicado com senha conhecida — evita prompt interativo do
+    # codesign quando o cert Distribution não tem partition-list no login
+    # keychain. Cria fresh a cada lane run; deletado no final.
+    keychain_name = "vyrlabs_fastlane.keychain"
+    keychain_pw = "vyrlabs-fastlane-2026"
+    sh("security delete-keychain #{keychain_name} 2>/dev/null || true")
+    create_keychain(
+      name: keychain_name,
+      password: keychain_pw,
+      default_keychain: false,
+      unlock: true,
+      timeout: 3600,
+      lock_when_sleeps: false,
+      add_to_search_list: true
+    )
+
+    # Apple Distribution cert via ASC API, instalado no keychain dedicado.
+    cert(
+      api_key: api_key,
+      development: false,
+      output_path: "build",
+      keychain_path: File.expand_path("~/Library/Keychains/#{keychain_name}-db"),
+      keychain_password: keychain_pw,
+      force: false
+    )
+
+    # Libera codesign a usar a private key sem prompt no keychain dedicado.
+    sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k '#{keychain_pw}' ~/Library/Keychains/#{keychain_name}-db || true")
+
+    # Remove login.keychain do search list — força codesign a usar SÓ o
+    # keychain dedicado (cuja private key tem partition-list correta).
+    # Caso contrário codesign acha o cert duplicado em login.keychain (com
+    # ACL "confirm always") e trava esperando senha.
+    original_keychains = `security list-keychains -d user`.strip
+    sh("security list-keychains -d user -s ~/Library/Keychains/#{keychain_name}-db")
+
     sigh(
       api_key: api_key,
       app_identifier: "com.vyrlabs.app",
@@ -164,6 +196,7 @@ platform :ios do
       code_sign_identity: "Apple Distribution"
     )
 
+    keychain_db = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
     build_app(
       workspace: "App/App.xcworkspace",
       scheme: "App",
@@ -172,7 +205,7 @@ platform :ios do
       clean: true,
       output_directory: "build",
       output_name: "VYR.ipa",
-      xcargs: "-allowProvisioningUpdates",
+      xcargs: "-allowProvisioningUpdates OTHER_CODE_SIGN_FLAGS='--keychain #{keychain_db}'",
       export_options: {
         method: "app-store",
         signingStyle: "manual",
@@ -190,6 +223,12 @@ platform :ios do
        "--apiKey '#{ENV['APP_STORE_CONNECT_API_KEY_ID']}' " \
        "--apiIssuer '#{ENV['APP_STORE_CONNECT_API_ISSUER_ID']}'")
     UI.success("Uploaded build #{new_build_number} to TestFlight (Internal auto-linked)")
+
+    # Restaura search list de keychains do usuário.
+    sh("security list-keychains -d user -s #{original_keychains}")
+
+    # Cleanup keychain dedicado pós-upload.
+    sh("security delete-keychain #{keychain_name} 2>/dev/null || true")
   end
 
   def default_changelog

@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.vyrlabs.app.ringsync</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -32,7 +36,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>392</string>
+	<string>403</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -41,6 +45,10 @@
 	<string>VYR Labs connects to your QRing (Colmi R02/R03/R06) smart ring over Bluetooth Low Energy to sync heart rate, sleep, SpO2, HRV and stress data directly from the device.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>VYR Labs needs Bluetooth to communicate with your QRing smart ring.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>VYR Labs may read health data from Apple Health for legacy compatibility. Active integration is via the smart ring (Bluetooth) — Apple Health access is optional and disabled by default.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>VYR Labs may write samples to Apple Health for legacy compatibility. Active integration is via the smart ring (Bluetooth) — writing to Apple Health is optional and disabled by default.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>
