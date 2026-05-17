@@ -247,6 +247,9 @@ export function BiomarkersGrid() {
           ? `${dev.vendor === 'colmi' ? 'Colmi' : dev.vendor === 'jstyle' ? 'JStyle' : dev.vendor} ${dev.model ?? ''}`.trim()
           : 'Anel';
 
+        // Build 413: filtra samples com ts futuro (parser bug pode gerar até
+        // 32 dias à frente). Limite +1 dia pra cobrir diferenças timezone.
+        const nowPlus1d = new Date(Date.now() + 86400_000).toISOString();
         const fetchType = async (types: string[], lim = 500) => {
           const { data } = await supabase
             .from('biomarker_samples')
@@ -255,6 +258,7 @@ export function BiomarkersGrid() {
             .in('type', types)
             .in('source', RING_SOURCES)
             .gte('ts', since)
+            .lte('ts', nowPlus1d)
             .order('ts', { ascending: false })
             .limit(lim);
           return (data ?? []) as SampleRow[];
@@ -273,11 +277,32 @@ export function BiomarkersGrid() {
           fetchType(['ppg'], 1000),
         ]);
 
-        // Anchor day = dia local da última leitura disponível em qualquer tipo
+        // Build 413: Colmi não emite PPG 24-bit raw, mas anel R09 emite stream
+        // realtime ECG/PPG via cmd 0x69. Contamos esses packets em debug_raw
+        // como equivalente do "PPG samples" pra ter o card popular pra Colmi.
+        let colmiSignalCount = 0;
+        let colmiSignalLabel: string | undefined;
+        if (dev?.vendor === 'colmi') {
+          const { count } = await supabase
+            .from('biomarker_samples')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id)
+            .eq('type', 'debug_raw')
+            .eq('source', 'qring_ble')
+            .gte('ts', since)
+            .lte('ts', nowPlus1d)
+            .ilike('payload_json->>raw', '69 %');
+          colmiSignalCount = count ?? 0;
+          colmiSignalLabel = '7d · ECG/PPG stream';
+        }
+
+        // Anchor day = dia local da última leitura disponível em qualquer tipo.
+        // Build 413: defensiva extra contra ts futuro (mesmo se fetchType já filtra).
+        const nowMs = Date.now() + 86400_000;
         const allRowGroups = [hrRows, hrvRows, sleepRows, spo2Rows, tempRows, stressRows, rrRows, rhrRows, stepsRows];
         const maxTsIso = allRowGroups
           .map((rs) => rs[0]?.ts)
-          .filter((t): t is string => !!t)
+          .filter((t): t is string => !!t && new Date(t).getTime() <= nowMs)
           .reduce<string | null>((a, b) => (a == null || b > a ? b : a), null);
         const anchorDayKey = maxTsIso ? localDayKey(maxTsIso) : localDayKey(new Date().toISOString());
         const anchorIsoDay = `${anchorDayKey}T00:00:00`;
@@ -512,10 +537,19 @@ export function BiomarkersGrid() {
             chartType: 'bar', sourceLabel: ringLabel,
           },
           {
-            key: 'ppg', label: 'PPG (raw)', Icon: Zap, decimals: 0,
-            value: ppgRows.length ? `${ppgRows.length.toLocaleString('pt-BR')}` : '—',
-            rawNum: ppgRows.length || null, unit: 'amostras',
-            detail: ppgRows.length ? '7d · 24-bit ADC' : undefined,
+            // Build 413: card "PPG (raw)" pra JStyle = type='ppg' samples (24-bit ADC).
+            // Pra Colmi = contagem de packets cmd 0x69 (ECG/PPG stream realtime).
+            key: 'ppg', label: 'Sinal raw', Icon: Zap, decimals: 0,
+            value: dev?.vendor === 'colmi'
+              ? (colmiSignalCount ? colmiSignalCount.toLocaleString('pt-BR') : '—')
+              : (ppgRows.length ? ppgRows.length.toLocaleString('pt-BR') : '—'),
+            rawNum: dev?.vendor === 'colmi'
+              ? (colmiSignalCount || null)
+              : (ppgRows.length || null),
+            unit: 'amostras',
+            detail: dev?.vendor === 'colmi'
+              ? (colmiSignalCount ? colmiSignalLabel : undefined)
+              : (ppgRows.length ? '7d · 24-bit ADC' : undefined),
             isStale: false,
             series7d: series.ppg, typical: TYPICAL_BANDS.ppg,
             chartType: 'bar', sourceLabel: '24-bit ADC',

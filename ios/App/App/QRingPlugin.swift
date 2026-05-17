@@ -2096,6 +2096,14 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             receivedStepsPackets = 0
             return
         }
+        // Build 413: subIdx >= 0xF0 (=240) é END/TRAILER marker, não dado.
+        // Antes parser tratava como sub-indice de dados, calculava slot=3107,
+        // gerava samples com ts=hoje+32d (ex: 2026-06-18 11:45). Bug visível
+        // como anchor day errado na grid de biomarcadores.
+        if subIdx >= 0xF0 {
+            flushStepsBatch()
+            return
+        }
         let cal = Calendar.current
         let comps = cal.dateComponents([.year, .month, .day], from: Date())
         let midnight = cal.date(from: comps) ?? Date()

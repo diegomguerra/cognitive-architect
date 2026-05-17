@@ -1,21 +1,23 @@
-VYR 8.1(412) — Colmi reconnect robustness
+VYR 8.1(413) — Fixes parser passos Colmi + anchor day + Sinal raw Colmi
 
 O que mudou
-- Connect com retry automático: quando o anel não responde a service discovery
-  em 8s (sintoma de "pairing órfão" — anel descartou o bonding mas o iPhone
-  ainda usa cache antigo), o plugin cancela conexão, espera 2s pra liberar
-  bonding cache do iOS, e tenta de novo. Máximo 1 retry.
-- Mensagem de erro mais clara quando reconnect falha após retry:
-  "STALE_BONDING_OR_OUT_OF_RANGE: desligue Bluetooth do iPhone por 30s e tente
-  de novo, ou coloque anel no carregador 2min" — substitui o "CONNECT_TIMEOUT"
-  genérico que confundia Daniele/Lídia.
-- Stale timer cancelado automaticamente quando didDiscoverServices dispara
-  (connect saudável), evitando retry desnecessário em conexões boas.
+- Plugin parser passos (parseStepsHistory): trata `subIdx >= 0xF0` como
+  END/TRAILER marker, não como índice de dado. Antes parser calculava
+  slot=3107 e gerava amostra ts=hoje+32d (ex: 2026-06-18 11:45) — causava
+  anchor day errado na grid (mostrava "Biomarcadores · 18/06").
+- BiomarkersGrid: filtra `ts > now()+1d` no fetchType + defensiva extra
+  no anchor day calc. Mesmo que parser bug volte, dado futuro não
+  contamina a anchor day. Sample buggy do Daniele já foi deletado do DB.
+- Card "PPG (raw)" renomeado pra "Sinal raw". Para anéis Colmi, conta
+  packets cmd 0x69 (ECG/PPG stream realtime) em vez do type='ppg'
+  (que só JStyle emite). Daniele/Lídia passam a ver número de amostras
+  do sinal raw deles mesmo sem PPG 24-bit ADC do JStyle.
 
-Backend (nenhuma mudança)
+Backend (sem mudança)
 - parse-vendor-raw v18 inalterado.
 
-Próximas builds
-- Parser sleep Big Data V2 (resposta cmd 0xBC + sub-id 0x27 capturada em 411).
-- Migrar decodificação Colmi inteira pra parse-vendor-raw (server-side).
-- Decode PPG multi-canal real (libBleSDK.a disassembly).
+Próximas builds (Colmi pendente)
+- Parser sleep Big Data V2 (resposta cmd 0xBC + sub-id 0x27 — anel respondeu
+  empty echo, precisa anel medir sono primeiro).
+- Migrar Colmi parsers inline pra parse-vendor-raw (server-side).
+- Decode PPG multi-canal real (libBleSDK.a).
