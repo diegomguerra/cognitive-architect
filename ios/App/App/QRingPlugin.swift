@@ -584,6 +584,22 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self.flushRealtimeBatch(type: "hr", samples: &self.realtimeHrSamples)
             self.flushRealtimeBatch(type: "spo2", samples: &self.realtimeSpo2Samples)
             self.flushRealtimeBatch(type: "hrv", samples: &self.realtimeHrvSamples)
+            // Build 409: força flush de history buffers Colmi (steps, spo2, sleep)
+            // que dependiam do header packet subIdx==0 — anel R09 frequentemente
+            // não emite o header, deixando samples no buffer pra sempre. Aqui
+            // garantimos que qualquer dado acumulado vai pro upload.
+            if !self.stepsSamples.isEmpty {
+                self.notifyListeners("syncData", data: ["type": "steps", "samples": self.stepsSamples])
+                self.stepsSamples.removeAll()
+            }
+            if !self.spo2Samples.isEmpty {
+                self.notifyListeners("syncData", data: ["type": "spo2", "samples": self.spo2Samples])
+                self.spo2Samples.removeAll()
+            }
+            if !self.sleepSamples.isEmpty {
+                self.notifyListeners("syncData", data: ["type": "sleep", "samples": self.sleepSamples])
+                self.sleepSamples.removeAll()
+            }
             self.deriveBiomarkers()
             self.flushDebugRawBatch(force: true)
 

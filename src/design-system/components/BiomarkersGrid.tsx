@@ -234,6 +234,19 @@ export function BiomarkersGrid() {
 
         const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
 
+        // Lookup do device pareado do usuário pra montar sourceLabel correto.
+        // Cada card mostra o anel real ("Colmi R09" pra Lídia/Daniele; "JStyle X5" pra Diego).
+        const { data: devRows } = await supabase
+          .from('devices')
+          .select('vendor, model')
+          .eq('user_id', user.id)
+          .order('last_seen_at', { ascending: false })
+          .limit(1);
+        const dev = devRows?.[0];
+        const ringLabel = dev
+          ? `${dev.vendor === 'colmi' ? 'Colmi' : dev.vendor === 'jstyle' ? 'JStyle' : dev.vendor} ${dev.model ?? ''}`.trim()
+          : 'Anel';
+
         const fetchType = async (types: string[], lim = 500) => {
           const { data } = await supabase
             .from('biomarker_samples')
@@ -317,15 +330,29 @@ export function BiomarkersGrid() {
             isStale = true;
           }
           if (rowsToUse.length === 0) return null;
-          let totalMin = 0, rem = 0, light = 0, deep = 0;
+          // Dedup minuto-a-minuto: parse-vendor-raw emite múltiplos records (vindos
+          // de packets de paginação que se sobrepõem temporalmente) cobrindo o mesmo
+          // intervalo da noite. Somar duration_min ingenuamente gera 38h+ por noite.
+          // Constrói timeline: cada minuto recebe um único stage (primeiro que chega).
+          const minuteStage = new Map<number, string>();
           for (const r of rowsToUse) {
-            const stage = ((r.payload_json as Record<string, unknown>)?.stage ?? '') as string;
+            const stage = (((r.payload_json as Record<string, unknown>)?.stage ?? '') as string).toLowerCase();
+            if (!stage) continue;
+            const startMs = new Date(r.ts).getTime();
             const dur = Number((r.payload_json as Record<string, unknown>)?.duration_min ?? 1);
-            totalMin += dur;
-            const s = stage.toLowerCase();
-            if (s.includes('rem')) rem += dur;
-            else if (s.includes('deep') || s.includes('profundo')) deep += dur;
-            else if (s.includes('light') || s.includes('leve')) light += dur;
+            const minuteCount = Math.max(1, Math.round(dur));
+            const startMinute = Math.floor(startMs / 60_000);
+            for (let m = 0; m < minuteCount; m++) {
+              const key = startMinute + m;
+              if (!minuteStage.has(key)) minuteStage.set(key, stage);
+            }
+          }
+          let totalMin = 0, rem = 0, light = 0, deep = 0;
+          for (const stage of minuteStage.values()) {
+            totalMin += 1;
+            if (stage.includes('rem')) rem += 1;
+            else if (stage.includes('deep') || stage.includes('profundo')) deep += 1;
+            else if (stage.includes('light') || stage.includes('leve')) light += 1;
           }
           const out: SleepBreakdown = { totalHours: Math.round((totalMin / 60) * 10) / 10 };
           if (rem || light || deep) {
@@ -399,7 +426,7 @@ export function BiomarkersGrid() {
             detail: hr.value != null ? `média · n=${hr.n}` : undefined,
             isStale: hr.isStale, lastTimestamp: formatLastTs(hr.ts),
             series7d: series.hr, typical: TYPICAL_BANDS.hr,
-            chartType: 'line', sourceLabel: 'JStyle X5',
+            chartType: 'line', sourceLabel: ringLabel,
           },
           {
             key: 'rhr', label: 'FC de Repouso', Icon: HeartPulse, decimals: 0,
@@ -408,7 +435,7 @@ export function BiomarkersGrid() {
             detail: rhr.derived ? `derivado p10 · n=${rhr.n}` : rhr.value != null ? `direto · n=${rhr.n}` : undefined,
             isStale: rhr.isStale, lastTimestamp: formatLastTs(rhr.ts),
             series7d: series.rhr, typical: TYPICAL_BANDS.rhr,
-            chartType: 'line', sourceLabel: rhr.derived ? 'derivado · HR p10' : 'JStyle X5',
+            chartType: 'line', sourceLabel: rhr.derived ? 'derivado · HR p10' : ringLabel,
           },
           {
             key: 'hrv', label: 'HRV (RMSSD)', Icon: Activity, decimals: 0,
@@ -418,7 +445,7 @@ export function BiomarkersGrid() {
             qualityNote: hrv.value == null ? 'Sem leitura válida' : undefined,
             isStale: hrv.isStale, lastTimestamp: formatLastTs(hrv.ts),
             series7d: series.hrv, typical: TYPICAL_BANDS.hrv,
-            chartType: 'line', sourceLabel: 'JStyle X5',
+            chartType: 'line', sourceLabel: ringLabel,
           },
           {
             key: 'rr', label: 'Intervalos RR', Icon: Waves, decimals: 0,
@@ -427,7 +454,7 @@ export function BiomarkersGrid() {
             detail: rr.value != null ? `média · n=${rr.n}` : undefined,
             isStale: rr.isStale, lastTimestamp: formatLastTs(rr.ts),
             series7d: series.rr, typical: TYPICAL_BANDS.rr,
-            chartType: 'line', sourceLabel: 'JStyle X5',
+            chartType: 'line', sourceLabel: ringLabel,
           },
           {
             key: 'sleep', label: 'Sono', Icon: Moon, decimals: 1,
@@ -446,7 +473,7 @@ export function BiomarkersGrid() {
             isStale: sleepBreak?.isStale ?? true,
             lastTimestamp: formatLastTs(lastTs(sleepRows)),
             series7d: series.sleep, typical: TYPICAL_BANDS.sleep,
-            chartType: 'bar', sourceLabel: 'JStyle X5',
+            chartType: 'bar', sourceLabel: ringLabel,
           },
           {
             key: 'spo2', label: 'SpO₂', Icon: Droplets, decimals: 0,
@@ -455,7 +482,7 @@ export function BiomarkersGrid() {
             detail: spo2.value != null ? `média · n=${spo2.n}` : undefined,
             isStale: spo2.isStale, lastTimestamp: formatLastTs(spo2.ts),
             series7d: series.spo2, typical: TYPICAL_BANDS.spo2,
-            chartType: 'line', sourceLabel: 'JStyle X5',
+            chartType: 'line', sourceLabel: ringLabel,
           },
           {
             key: 'temp', label: 'Temperatura', Icon: Thermometer, decimals: 1,
@@ -473,7 +500,7 @@ export function BiomarkersGrid() {
             detail: stressFinal.derived ? `derivado de HRV ${Math.round(hrv.value ?? 0)}ms` : stressFinal.value != null ? `n=${stressFinal.n}` : undefined,
             isStale: stressFinal.isStale, lastTimestamp: formatLastTs(stressFinal.ts),
             series7d: series.stress, typical: TYPICAL_BANDS.stress,
-            chartType: 'line', sourceLabel: stressFinal.derived ? 'derivado · HRV' : 'JStyle X5',
+            chartType: 'line', sourceLabel: stressFinal.derived ? 'derivado · HRV' : ringLabel,
           },
           {
             key: 'steps', label: 'Passos', Icon: Footprints, decimals: 0,
@@ -482,7 +509,7 @@ export function BiomarkersGrid() {
             detail: stepsAgg.value != null ? `máx do dia · n=${stepsAgg.n}` : undefined,
             isStale: stepsAgg.isStale, lastTimestamp: formatLastTs(stepsAgg.ts),
             series7d: series.steps, typical: TYPICAL_BANDS.steps,
-            chartType: 'bar', sourceLabel: 'JStyle X5',
+            chartType: 'bar', sourceLabel: ringLabel,
           },
           {
             key: 'ppg', label: 'PPG (raw)', Icon: Zap, decimals: 0,

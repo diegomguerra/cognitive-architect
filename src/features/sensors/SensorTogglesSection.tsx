@@ -47,12 +47,22 @@ function saveState(state: Record<SensorType, SensorState>) {
 export function SensorTogglesSection() {
   const [state, setState] = useState<Record<SensorType, SensorState>>(loadState);
   const [connected, setConnected] = useState(false);
+  const [vendor, setVendor] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = wearableStore.subscribe((s) => setConnected(!!s.connectedDevice));
-    setConnected(!!wearableStore.getState().connectedDevice);
+    const sync = (s: ReturnType<typeof wearableStore.getState>) => {
+      setConnected(!!s.connectedDevice);
+      setVendor((s.connectedDevice?.vendor ?? null) as string | null);
+    };
+    const unsub = wearableStore.subscribe(sync);
+    sync(wearableStore.getState());
     return unsub;
   }, []);
+
+  // "Medir Agora" (cmd 0x28 JStyle) só funciona em JStyle hoje. Colmi tem
+  // protocolo diferente e ainda não está implementado no plugin nativo —
+  // esconde o botão pra evitar erro "NOT_JSTYLE: vendor=colmi".
+  const manualMeasureSupported = vendor === 'jstyle';
 
   const update = async (type: SensorType, patch: Partial<SensorState>) => {
     const next = { ...state, [type]: { ...state[type], ...patch } };
@@ -139,7 +149,7 @@ export function SensorTogglesSection() {
                   <option key={v} value={v}>{v} min</option>
                 ))}
               </select>
-              {s.manualSupported && (
+              {s.manualSupported && manualMeasureSupported && (
                 <button
                   onClick={() => measureNow(s.type)}
                   disabled={!connected || cur.busy}
@@ -148,6 +158,11 @@ export function SensorTogglesSection() {
                   <Play size={10} strokeWidth={2} />
                   Medir agora
                 </button>
+              )}
+              {s.manualSupported && !manualMeasureSupported && vendor === 'colmi' && (
+                <span className="ml-auto font-mono text-[9px] tracking-wider uppercase text-muted-foreground italic">
+                  auto · Colmi
+                </span>
               )}
             </div>
 
