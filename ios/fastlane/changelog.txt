@@ -1,27 +1,21 @@
-VYR 8.1(406) — HRV/Estresse fresh + PPG auto-capture cedo
+VYR 8.1 — Biomarcadores cards V2 (gráfico 7 dias por card)
 
 O que mudou
-- Phase 4 PPG do sync: movido de t+45s para t+5s. Anel JStyle X5 frequentemente
-  desconecta em ~38s apos history dump — Phase 4 antiga em t+45s nao disparava
-  a tempo. Agora roda em paralelo com Phase 3 history queue (cmd 0x78 PPG usa
-  canal de notify independente, suporta interleave com pagination). Captura
-  30s completa termina em t+35s, bem antes do disconnect tipico.
-- Frontend BiomarkersGrid: filtra HRV samples marcados como 'noisy_multichannel'
-  pelo parse-vendor-raw v16. Prefere amostra clean (mesmo stale) sobre noisy fresh
-  pra evitar exibir RMSSD inflado em sinal multi-canal nao-decodificado.
-- Frontend Estresse: prefere derivacao de HRV-fresh sobre stress direto stale.
-  Cmd 0x56 do anel emite stress raramente — quando HRV fresco existe, derivar
-  via formula (100 - hrv*1.2) e mais util que stress direto de dias atras.
+- Cards de biomarcadores (menu Insight) agora ocupam linha cheia (1 por linha),
+  com letras bem maiores e mini-gráfico de 7 dias EMBUTIDO em cada card.
+- Label explícito "ÚLTIMOS 7 DIAS · média diária" (ou "totais diários" pra
+  Sono/Passos/PPG) acima do mini-gráfico — fica claro o que cada barra/linha
+  representa sem precisar abrir detalhe.
+- Cada card mostra Mín / Média / Máx 7d em linha de estatísticas dedicada,
+  faixa típica da métrica, fonte do dado (JStyle X5 / derivado HR p10 / etc)
+  e timestamp da última leitura.
+- Card de Sono ganhou bloco de Eficiência (% grande) ao lado do total de horas.
+- Delta vs média 7d como chip colorido (verde/vermelho/cinza) com seta de
+  tendência ↑/↓/→.
+- Contraste tipográfico revisto: removido todo cinza fraco (ink3) do conteúdo
+  dos cards. Piso mínimo dos textos auxiliares passou de 9px ink3 → 11/12px
+  ink1. Valores principais em 54px, eficiência em 38px, label de seção em 26px.
 
-Edge function parse-vendor-raw v16 (Supabase) deployado em paralelo com:
-- Successive Difference Filter padrao Polar/Garmin/Kubios — Δ<100ms entre RRs
-  consecutivos identifica pares intra-canal vs channel-jumps. RMSSD calculado
-  apenas nos pares intra-canal = HRV honesto. Diego: 75% das transicoes eram
-  channel-jumps; SDF resgatou 18 pares limpos resultando em HRV=55ms (faixa
-  fisiologica saudavel) em vez do RMSSD raw=359ms.
-
-Bugs ainda abertos pra proximas builds
-- Decode multi-canal real do PPG (separar LEDs verde/vermelho/IR) — solucao
-  definitiva quando reverse engineering do formato estiver pronto.
-- "Medir Agora" Colmi mismatch.
-- Reconnect Colmi apos CONNECT_TIMEOUT manual workaround.
+Próximo passo (não nesta build)
+- Tap no card abrir drawer com tabs Dia/Semana/Mês como Oura/Whoop
+  (mockup pronto em mockups/biomarker-detail-drawer-v2.html).
