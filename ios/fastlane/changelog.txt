@@ -1,17 +1,23 @@
-VYR 8.1(410) — Biomarker detail vira página dedicada (não mais drawer)
+VYR 8.1(411) — Safe-area iOS + Colmi sleep request
 
 O que mudou
-- Toque no card de biomarcador agora abre PÁGINA NOVA (rota /biomarker/:key)
-  em vez de drawer modal. Permite rolagem nativa completa sem perder info da
-  tela de Insights por trás. Back button no topo (sticky) volta pra Insights.
-- Layout otimizado pra leitura full-screen: hero value 64px, chart 220px,
-  stats cards maiores, faixas com mais respiro. Tabs Dia/Semana/Mês idênticos
-  à versão anterior do drawer.
-- Drawer modal removido — código fica em src/features/biomarker-detail/
-  como dead-code reusável (hook useBiomarkerSeries continua sendo a fonte
-  única de dados pra detail).
+- Safe-area-top corrigido em TODAS as paginas: minimo agora 48px (era 8px),
+  usa env(safe-area-inset-top) em iPhones com notch (47-59px). Botoes de
+  voltar nas paginas Insights / Daily State / Year Story / Biomarker Detail
+  nao ficam mais clipados pela status bar / Dynamic Island.
+- Safe-area-bottom minimo 24px (era 8px): conteudo de rodape nao gruda mais
+  no home indicator iOS.
+- Pagina de Biomarker Detail agora respeita safe-area em ambas as bordas.
 
-Próximas builds
-- Colmi Sleep history via Big Data V2 (ID 39) — cmd 0x44 não funciona no R09.
-- Decode PPG multi-canal real (libBleSDK.a).
-- Colmi reconnect robustness.
+Backend (anel Colmi R09)
+- Plugin pede sleep history via Big Data V2 (cmd 0xBC + sub-id 0x27=39 decimal)
+  alem do temp existente. Cmd 0x44 V1 sleep retorna erro no R09; este e o
+  caminho documentado pelo protocolo. Resposta cai em debug_raw - parser
+  dedicado vira em build 412+ apos inspecao byte-level dos packets capturados
+  do anel Daniele/Lidia.
+
+Proximas builds (Colmi pendente)
+- Parser sleep Big Data V2 (412) com base nos bytes raw capturados.
+- Fix parsers SpO2 / Steps (Lidia tem packets 0x2C / 0x43 chegando mas
+  parser inline quebra antes do flush).
+- Migrar decodificacao Colmi inteira pra parse-vendor-raw (server-side).

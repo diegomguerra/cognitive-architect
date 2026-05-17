@@ -23,7 +23,7 @@ export default function InsightsIndexDetailScreen() {
 
   if (!validType) {
     return (
-      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 pt-12">
+      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 safe-area-top">
         <AppHeader variant="detail" title="ERRO" onBack={() => nav('/insights')} />
         <p className="text-ds-ink1 text-sm mt-6">Tipo de índice inválido.</p>
         <BottomNav />
@@ -41,7 +41,7 @@ export default function InsightsIndexDetailScreen() {
 
   if (error || !data) {
     return (
-      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 pt-12">
+      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 safe-area-top">
         <AppHeader variant="detail" title={TITLES[validType]} onBack={() => nav('/insights')} />
         <p className="text-ds-ink1 text-sm mt-6">{error || 'Sem dados.'}</p>
         <BottomNav />
@@ -55,7 +55,7 @@ export default function InsightsIndexDetailScreen() {
 
   return (
     <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
-      <header className="px-4 pt-12">
+      <header className="px-4 safe-area-top">
         <AppHeader variant="detail" title={TITLES[validType]} onBack={() => nav('/insights')} />
       </header>
 

@@ -107,12 +107,17 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* min 48px: garante respiro visual em iPhones sem notch (status bar 20px)
+     e usa env() em iPhones com notch (~47-59px) — assim botões de header
+     nunca ficam clipados pela status bar nem grudados no topo. */
   .safe-area-top {
-    padding-top: max(env(safe-area-inset-top, 0px), 8px);
+    padding-top: max(env(safe-area-inset-top, 0px), 48px);
   }
 
+  /* min 24px: home indicator iOS ~34px; mantém botões/conteúdo do rodapé
+     fora da área do gesture indicator. */
   .safe-area-bottom {
-    padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
   }
 
   /* Cobre a safe area do iPhone abaixo da BottomNav */

@@ -121,6 +121,7 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     // V2 Commands
     private static let CMD_BIG_DATA_V2:         UInt8 = 0xBC
     private static let BIG_DATA_TYPE_TEMP:      UInt8 = 0x25
+    private static let BIG_DATA_TYPE_SLEEP:     UInt8 = 0x27  // build 411: R09 sleep via Big Data V2
 
     private static let RT_TYPE_HR:   UInt8 = 0x01
     private static let RT_TYPE_SPO2: UInt8 = 0x03
@@ -539,10 +540,16 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
 
-        // Phase 2: V2 Temperature history (Colmi only â JStyle has no V2 channel)
+        // Phase 2: V2 Big Data history (Colmi only - JStyle has no V2 channel).
+        // Build 411: alem de temp, pede Sleep via sub-id 0x27 (=39 decimal).
+        // Cmd 0x44 V1 sleep history retorna erro no R09; Big Data V2 e o caminho.
+        // Resposta vai pra debug_raw - parser virá em build 412+ apos inspecao bytes.
         if deviceVendor != .jstyle {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.sendTemperatureHistoryRequest()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.sendSleepHistoryRequest()
             }
         }
 
@@ -1629,6 +1636,27 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             0x01, 0x00,                     // length LE = 1
             0x3E, 0x81, 0x02                // payload
         ])
+        queueWriteV2(pkt)
+    }
+
+    /// Request SLEEP history via V2 "big data" channel (build 411).
+    /// Cmd 0x44 V1 sleep history retorna erro 0xC4 no R09 — Colmi documenta que
+    /// sleep nesse firmware exige Big Data V2 com sub-id 0x27 (= 39 decimal).
+    /// Mesmo wrapper que temp (BC 27 01 00 ...). Resposta cai em debug_raw
+    /// (qring_ble) pra inspeção; parser dedicado virá em build 412+ após
+    /// confirmar formato byte-level do response.
+    private func sendSleepHistoryRequest() {
+        guard writeCharV2 != nil, peripheral != nil else {
+            NSLog("[QRing] skip sleep history — V2 write char not available")
+            return
+        }
+        let pkt = Data([
+            Self.CMD_BIG_DATA_V2,           // 0xBC
+            Self.BIG_DATA_TYPE_SLEEP,       // 0x27
+            0x01, 0x00,                     // length LE = 1 (placeholder, ajustar se anel exigir)
+            0x3E, 0x81, 0x02                // payload (mesmo padrão de temp)
+        ])
+        NSLog("[QRing] sleep BigDataV2 request: BC 27 01 00 3E 81 02")
         queueWriteV2(pkt)
     }
 

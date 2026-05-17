@@ -32,7 +32,7 @@ export default function InsightsScreen() {
 
   if (error || !data) {
     return (
-      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 pt-12 pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
+      <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 px-4 safe-area-top pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
         <AppHeader variant="home" />
         <p className="text-ds-ink1 text-sm mt-12">{error || 'Sem dados disponíveis no momento.'}</p>
         <BottomNav />
@@ -42,7 +42,7 @@ export default function InsightsScreen() {
 
   return (
     <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
-      <header className="px-4 pt-12">
+      <header className="px-4 safe-area-top">
         <AppHeader variant="home" />
       </header>
 

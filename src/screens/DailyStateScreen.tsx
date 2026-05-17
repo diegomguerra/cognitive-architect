@@ -51,7 +51,7 @@ export default function DailyStateScreen() {
 
   return (
     <div className="min-h-dvh bg-ds-bg0 text-ds-ink0 pb-24" style={{ fontFamily: 'Inter, sans-serif' }}>
-      <header className="px-4 pt-12">
+      <header className="px-4 safe-area-top">
         <AppHeader variant="detail" title="ESTADO · DIA" onBack={() => nav('/insights')} />
       </header>
 

@@ -160,8 +160,9 @@ export default function BiomarkerDetail() {
         ['--ppg-c' as never]: META.ppg.colorFallback,
       }}
     >
-      {/* Top bar — sticky pra back sempre acessível */}
-      <header className="sticky top-0 z-10 bg-ds-bg0/95 backdrop-blur-sm border-b border-white/[0.08] px-4 py-3 flex items-center gap-3">
+      {/* Top bar — sticky pra back sempre acessível. safe-area-top empurra
+          o conteúdo pra baixo do notch/status bar iOS senão back fica clipado. */}
+      <header className="sticky top-0 z-10 bg-ds-bg0/95 backdrop-blur-sm border-b border-white/[0.08] px-4 py-3 flex items-center gap-3 safe-area-top">
         <button
           onClick={() => navigate(-1)}
           className="flex items-center justify-center w-10 h-10 rounded-full border border-white/[0.15] text-ds-ink1 hover:text-ds-ink0 hover:border-white/[0.3] transition-colors"
@@ -182,8 +183,8 @@ export default function BiomarkerDetail() {
         </div>
       </header>
 
-      {/* Conteúdo */}
-      <div className="px-4 pt-5 pb-12 max-w-[640px] mx-auto">
+      {/* Conteúdo — pb generoso pra home indicator iOS não cortar último card */}
+      <div className="px-4 pt-5 pb-32 max-w-[640px] mx-auto safe-area-bottom">
         {/* Hero value */}
         <div className="mb-5">
           <div className="flex items-baseline gap-2 flex-wrap">
