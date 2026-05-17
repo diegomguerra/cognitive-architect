@@ -1,23 +1,24 @@
-VYR 8.1(413) — Fixes parser passos Colmi + anchor day + Sinal raw Colmi
+VYR 8.1(414) — 5 fixes UX (contador, badge, ponto verde, nav, bateria Colmi)
 
 O que mudou
-- Plugin parser passos (parseStepsHistory): trata `subIdx >= 0xF0` como
-  END/TRAILER marker, não como índice de dado. Antes parser calculava
-  slot=3107 e gerava amostra ts=hoje+32d (ex: 2026-06-18 11:45) — causava
-  anchor day errado na grid (mostrava "Biomarcadores · 18/06").
-- BiomarkersGrid: filtra `ts > now()+1d` no fetchType + defensiva extra
-  no anchor day calc. Mesmo que parser bug volte, dado futuro não
-  contamina a anchor day. Sample buggy do Daniele já foi deletado do DB.
-- Card "PPG (raw)" renomeado pra "Sinal raw". Para anéis Colmi, conta
-  packets cmd 0x69 (ECG/PPG stream realtime) em vez do type='ppg'
-  (que só JStyle emite). Daniele/Lídia passam a ver número de amostras
-  do sinal raw deles mesmo sem PPG 24-bit ADC do JStyle.
-
-Backend (sem mudança)
-- parse-vendor-raw v18 inalterado.
-
-Próximas builds (Colmi pendente)
-- Parser sleep Big Data V2 (resposta cmd 0xBC + sub-id 0x27 — anel respondeu
-  empty echo, precisa anel medir sono primeiro).
-- Migrar Colmi parsers inline pra parse-vendor-raw (server-side).
-- Decode PPG multi-canal real (libBleSDK.a).
+- Contador "X/10 hoje" no topo dos Biomarcadores agora conta cards COM dado
+  (rawNum != null), nao apenas cards fresh do anchor day. Lidia/Daniele
+  tinham 8 cards com dado mas 5 deles eram stale → mostrava "3/10" confuso.
+  Agora mostra "8/10" preciso.
+- Badge "anterior" no canto superior direito dos cards stale agora mostra
+  a DATA da leitura (DD/MM) — ex: "16/05" em vez do adjetivo generico.
+  Fica auto-explicativo.
+- Ponto de status no header (NODE):
+  * VERDE quando anel conectado E sync fresh (era branco antes — usuario
+    nao distinguia "conectado" de "desconhecido")
+  * Branco quando desconectado mas dados recentes
+  * Ambar quando stale (>1h) ou bateria baixa (<20%)
+- BottomNav: removido o pseudo-element ::after da .safe-area-bottom que
+  cobria os labels "Home/Insights/Labs/Config" no iPhone 15 Pro Max
+  (z-index 19 sobrepunha texto z-0 dentro do stacking context do nav z-20).
+  Era redundante porque BottomNav ja tem bg-vyr-bg-primary cobrindo sua
+  propria safe area via padding-bottom.
+- Plugin parseBattery (Colmi): alem de notifyListeners("battery"), agora
+  tambem persiste type='battery' sample via "syncData". RingStatusBadge
+  no frontend ja consultava biomarker_samples como fallback — agora
+  Daniele/Lidia veem a porcentagem de bateria no header igual o Diego.

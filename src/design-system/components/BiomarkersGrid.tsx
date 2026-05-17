@@ -568,7 +568,10 @@ export function BiomarkersGrid() {
     return () => { cancelled = true; };
   }, []);
 
-  const filledCount = useMemo(() => cards.filter((c) => c.rawNum != null && !c.isStale).length, [cards]);
+  // Build 414: counter conta cards COM dado (rawNum != null), independente
+  // de isStale. Antes ignorava cards stale, mostrando "3/10" quando Lídia/
+  // Daniele só tinham 2 cards zerados (Sono/SpO2) — confuso.
+  const filledCount = useMemo(() => cards.filter((c) => c.rawNum != null).length, [cards]);
   const totalCount = cards.length;
 
   if (loading) {
@@ -636,7 +639,9 @@ export function BiomarkersGrid() {
                 </span>
                 {c.isStale && !isNull && (
                   <span className="font-mono text-[11px] tracking-wide1 text-ds-ink1 uppercase whitespace-nowrap bg-ds-bg0 border border-white/[0.15] px-2.5 py-1 rounded-full">
-                    anterior
+                    {/* Build 414: troca "anterior" pela DATA da leitura (DD/MM)
+                        pra ser auto-explicativo (vs adjetivo genérico). */}
+                    {c.lastTimestamp ? c.lastTimestamp.split(' ')[0] : 'anterior'}
                   </span>
                 )}
                 <ChevronRight size={20} className="text-ds-ink2 ml-1 flex-shrink-0" strokeWidth={1.8} />

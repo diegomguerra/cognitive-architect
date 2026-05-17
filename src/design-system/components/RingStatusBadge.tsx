@@ -65,9 +65,15 @@ export function RingStatusBadge() {
     return `${Math.floor(min / 1440)}d`;
   };
 
-  const stale = (status.minutesSinceLast ?? 0) > 60;
+  const stale = (status.minutesSinceLast ?? 999) > 60;
   const lowBattery = (status.battery ?? 100) < 20;
-  const dotColor = stale || lowBattery ? '#D97706' : '#FAFAFA';
+  // Build 414: ponto VERDE quando conectado E sync fresh. Antes era branco
+  // (#FAFAFA) — mesmo conectado o user não distinguia de "desconhecido".
+  const dotColor = stale || lowBattery
+    ? '#D97706'  // âmbar — atenção (stale ou bateria baixa)
+    : status.connected
+      ? '#34D399'  // verde — conectado e saudável
+      : '#FAFAFA'; // branco — não conectado mas tem dados recentes
 
   return (
     <span className="font-mono text-[10px] tracking-wide1 text-ds-ink1 uppercase flex items-center gap-1.5 px-2">

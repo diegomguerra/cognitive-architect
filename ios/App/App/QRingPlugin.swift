@@ -2020,6 +2020,19 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
         let pct = Int(b[1])
         let charging = b[2] == 0x01
         notifyListeners("battery", data: ["battery": pct, "charging": charging])
+        // Build 414: also persist as typed sample so RingStatusBadge frontend
+        // pode mostrar bateria Colmi (Daniele/Lidia). Anteriormente so JStyle
+        // tinha type='battery' samples (via parse-vendor-raw v18).
+        if (0...100).contains(pct) {
+            let sample: [String: Any] = [
+                "type": "battery",
+                "ts": nowMsUnique(),
+                "value": pct,
+                "source": "qring_ble",
+                "payload_json": ["charging": charging, "mode": "colmi_cmd03"],
+            ]
+            notifyListeners("syncData", data: ["type": "battery", "samples": [sample]])
+        }
     }
 
     private func parseHrHistory(_ b: [UInt8]) {

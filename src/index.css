@@ -120,18 +120,12 @@
     padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
   }
 
-  /* Cobre a safe area do iPhone abaixo da BottomNav */
-  .safe-area-bottom::after {
-    content: '';
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: env(safe-area-inset-bottom, 0px);
-    background: hsl(var(--vyr-bg-primary));
-    z-index: 19;
-    pointer-events: none;
-  }
+  /* Build 414: removido o ::after que cobria a safe-area com cor primaria.
+     Causava clipping dos labels da BottomNav no iPhone 15 Pro Max (z-19
+     ficava ACIMA dos buttons children no stacking context do nav z-20,
+     ocultando o texto "Home/Insights/Labs/Config" embaixo dos ícones).
+     BottomNav já tem bg-vyr-bg-primary cobrindo sua própria safe area via
+     padding-bottom, então o ::after era redundante além de bugado. */
 
   .animate-delta-pulse {
     animation: delta-pulse 2s ease-in-out infinite;
