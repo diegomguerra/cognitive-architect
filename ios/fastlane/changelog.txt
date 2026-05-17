@@ -1,23 +1,21 @@
-VYR 8.1(411) — Safe-area iOS + Colmi sleep request
+VYR 8.1(412) — Colmi reconnect robustness
 
 O que mudou
-- Safe-area-top corrigido em TODAS as paginas: minimo agora 48px (era 8px),
-  usa env(safe-area-inset-top) em iPhones com notch (47-59px). Botoes de
-  voltar nas paginas Insights / Daily State / Year Story / Biomarker Detail
-  nao ficam mais clipados pela status bar / Dynamic Island.
-- Safe-area-bottom minimo 24px (era 8px): conteudo de rodape nao gruda mais
-  no home indicator iOS.
-- Pagina de Biomarker Detail agora respeita safe-area em ambas as bordas.
+- Connect com retry automático: quando o anel não responde a service discovery
+  em 8s (sintoma de "pairing órfão" — anel descartou o bonding mas o iPhone
+  ainda usa cache antigo), o plugin cancela conexão, espera 2s pra liberar
+  bonding cache do iOS, e tenta de novo. Máximo 1 retry.
+- Mensagem de erro mais clara quando reconnect falha após retry:
+  "STALE_BONDING_OR_OUT_OF_RANGE: desligue Bluetooth do iPhone por 30s e tente
+  de novo, ou coloque anel no carregador 2min" — substitui o "CONNECT_TIMEOUT"
+  genérico que confundia Daniele/Lídia.
+- Stale timer cancelado automaticamente quando didDiscoverServices dispara
+  (connect saudável), evitando retry desnecessário em conexões boas.
 
-Backend (anel Colmi R09)
-- Plugin pede sleep history via Big Data V2 (cmd 0xBC + sub-id 0x27=39 decimal)
-  alem do temp existente. Cmd 0x44 V1 sleep retorna erro no R09; este e o
-  caminho documentado pelo protocolo. Resposta cai em debug_raw - parser
-  dedicado vira em build 412+ apos inspecao byte-level dos packets capturados
-  do anel Daniele/Lidia.
+Backend (nenhuma mudança)
+- parse-vendor-raw v18 inalterado.
 
-Proximas builds (Colmi pendente)
-- Parser sleep Big Data V2 (412) com base nos bytes raw capturados.
-- Fix parsers SpO2 / Steps (Lidia tem packets 0x2C / 0x43 chegando mas
-  parser inline quebra antes do flush).
-- Migrar decodificacao Colmi inteira pra parse-vendor-raw (server-side).
+Próximas builds
+- Parser sleep Big Data V2 (resposta cmd 0xBC + sub-id 0x27 capturada em 411).
+- Migrar decodificação Colmi inteira pra parse-vendor-raw (server-side).
+- Decode PPG multi-canal real (libBleSDK.a disassembly).

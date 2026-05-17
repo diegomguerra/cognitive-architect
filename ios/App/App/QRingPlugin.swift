@@ -157,6 +157,12 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
     /// Retain discovered peripherals so CoreBluetooth does not GC them before connect
     private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private var connectCall: CAPPluginCall?
+    /// Build 412: tracking pra auto-retry quando didDiscoverServices não dispara
+    /// em 8s (sintoma de "pairing órfão" — anel tem stale bonding e ignora
+    /// service discovery). Retry máximo 1x; após isso reject com mensagem clara.
+    private var connectRetryCount: Int = 0
+    private var connectStaleTimer: DispatchWorkItem?
+    private var connectingDeviceId: String?
     private var pendingSyncCall: CAPPluginCall?
 
     // Op queue for V1 writes (CoreBluetooth allows parallel writes w/o response,
@@ -335,26 +341,64 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         connectCall = call
+        connectingDeviceId = deviceId
+        connectRetryCount = 0
         if central.isScanning { central.stopScan() }
         isScanning = false
         peripheral = p
         p.delegate = self
         deviceVendor = inferVendor(from: p.name ?? "")
         UserDefaults.standard.set(deviceId, forKey: Self.LS_LAST_DEVICE_ID)
-        // autoConnect via NotifyOnConnection — keeps trying even if ring drops
+        attemptConnect(p)
+    }
+
+    /// Build 412: encapsula a connect+timeout logic pra suportar retry.
+    /// Aciona retry automático após 8s sem didDiscoverServices (sintoma de
+    /// "pairing órfão" — anel mantém bonding cache que o iOS está usando
+    /// mas o anel não reconhece mais, então ignora service discovery).
+    /// Retry máximo 1x; depois reject com mensagem clara.
+    private func attemptConnect(_ p: CBPeripheral) {
+        discoveredServices.removeAll()
+        discoveredCharacteristics.removeAll()
         central.connect(p, options: [
             CBConnectPeripheralOptionNotifyOnConnectionKey: true,
             CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
         ])
-        // 20s connection timeout — BLE can be slow (adv interval + 1.5s settle + char discovery)
+        // Stale-bonding detection: se em 8s não tivermos discoveredServices, é
+        // sintoma de pairing órfão. Tenta retry 1x antes de desistir.
+        connectStaleTimer?.cancel()
+        let staleWork = DispatchWorkItem { [weak self] in
+            guard let self = self, self.connectCall != nil else { return }
+            if self.discoveredServices.isEmpty && self.connectRetryCount == 0 {
+                NSLog("[QRing] stale bonding detected (services=0 in 8s) — retrying once")
+                self.connectRetryCount += 1
+                self.central.cancelPeripheralConnection(p)
+                // 2s pra liberar bonding cache no iOS antes do retry
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                    guard let self = self, self.connectCall != nil else { return }
+                    self.attemptConnect(p)
+                }
+            }
+        }
+        connectStaleTimer = staleWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0, execute: staleWork)
+
+        // 20s hard timeout (somando retry). Reject com diagnóstico claro.
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self = self, self.connectCall != nil else { return }
+            self.connectStaleTimer?.cancel()
+            self.connectStaleTimer = nil
             self.central.cancelPeripheralConnection(p)
             let st = self.central.state.rawValue
-            self.lastError = "CONNECT_TIMEOUT after 20s (central.state=\(st), services=\(self.discoveredServices.count), chars=\(self.discoveredCharacteristics.count))"
+            let retried = self.connectRetryCount > 0 ? " (após \(self.connectRetryCount) retry)" : ""
+            self.lastError = "CONNECT_TIMEOUT 20s\(retried) (state=\(st), services=\(self.discoveredServices.count), chars=\(self.discoveredCharacteristics.count))"
             self.emitDebug()
-            self.connectCall?.reject("CONNECT_TIMEOUT")
+            let errCode = self.discoveredServices.isEmpty
+                ? "STALE_BONDING_OR_OUT_OF_RANGE: desligue Bluetooth do iPhone por 30s e tente de novo, ou coloque anel no carregador 2min"
+                : "CONNECT_TIMEOUT"
+            self.connectCall?.reject(errCode)
             self.connectCall = nil
+            self.connectRetryCount = 0
         }
     }
 
@@ -2625,6 +2669,10 @@ extension QRingPlugin: CBCentralManagerDelegate {
 
 extension QRingPlugin: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        // Build 412: services discovered = connect saudável. Cancela stale timer.
+        connectStaleTimer?.cancel()
+        connectStaleTimer = nil
+        connectRetryCount = 0
         guard error == nil else {
             let msg = error!.localizedDescription
             NSLog("[QRing] didDiscoverServices error: %@", msg)
