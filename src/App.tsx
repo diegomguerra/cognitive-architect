@@ -20,6 +20,7 @@ import DayReview from "./pages/DayReview";
 import IntegrationsPage from "./pages/Integrations";
 import Profile from "./pages/Profile";
 import Notifications from "./pages/Notifications";
+import BiomarkerDetail from "./pages/BiomarkerDetail";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +57,7 @@ const AppRoutes = () => (
     <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage /></ProtectedRoute>} />
     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+    <Route path="/biomarker/:key" element={<ProtectedRoute><BiomarkerDetail /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

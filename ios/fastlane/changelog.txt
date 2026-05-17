@@ -1,27 +1,17 @@
-VYR 8.1(409) — 5 bugs fix (Sono dedup + per-vendor + Colmi flush)
+VYR 8.1(410) — Biomarker detail vira página dedicada (não mais drawer)
 
 O que mudou
-- Sono: dedup minuto-a-minuto restaurado (regrediu no rewrite 407). Antes mostrava
-  38.4h em 1 noite — agora cada minuto da noite recebe um único stage (timeline),
-  total honesto (~7-11h). REM/Leve/Profundo voltam ao detalhe do card.
-- Card "Fonte do dado" agora reflete o anel REALMENTE conectado: "JStyle X5"
-  pro Diego, "Colmi R09" pra Lídia/Daniele. Era hardcoded JStyle pra todos.
-- Plugin Colmi: força flush de history buffers (steps, spo2, sleep) ao fim do
-  syncColmi independente do header packet subIdx==0. Anel R09 frequentemente
-  pula o header, deixando samples no buffer pra sempre. Agora qualquer dado
-  acumulado é uploaded no final do sync.
-- "Medir Agora" oculto pra Colmi (anel R09 não suporta cmd 0x28 manual,
-  protocolo diferente). Mostra label "auto · Colmi" no lugar. Era o erro
-  "JStyle vendor: colmi" que aparecia pra Lídia/Daniele.
-- Diagnóstico Card Energia/Estabilidade: zero é correto quando anel está
-  offline ou sample count baixo (Daniele: ring_samples_total=2 hoje).
-  Engine score retorna 0 honesto quando data_confidence é "insufficient".
+- Toque no card de biomarcador agora abre PÁGINA NOVA (rota /biomarker/:key)
+  em vez de drawer modal. Permite rolagem nativa completa sem perder info da
+  tela de Insights por trás. Back button no topo (sticky) volta pra Insights.
+- Layout otimizado pra leitura full-screen: hero value 64px, chart 220px,
+  stats cards maiores, faixas com mais respiro. Tabs Dia/Semana/Mês idênticos
+  à versão anterior do drawer.
+- Drawer modal removido — código fica em src/features/biomarker-detail/
+  como dead-code reusável (hook useBiomarkerSeries continua sendo a fonte
+  única de dados pra detail).
 
-Backend (sem mudanças nesta build)
-- parse-vendor-raw v18 ACTIVE (firmware extractor + SDF HRV) inalterado.
-
-Próximos passos pra build 410
-- Implementar Big Data V2 (ID 39) pra Colmi Sleep history (cmd 0x44 retorna
-  erro no R09 — firmware exige protocolo V2).
-- Decode PPG multi-canal real (libBleSDK.a disassembly).
-- Colmi reconnect robustness (CONNECT_TIMEOUT retry).
+Próximas builds
+- Colmi Sleep history via Big Data V2 (ID 39) — cmd 0x44 não funciona no R09.
+- Decode PPG multi-canal real (libBleSDK.a).
+- Colmi reconnect robustness.

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Heart, Activity, Moon, Droplets, Thermometer, Brain, Zap, Footprints, Waves, HeartPulse, ChevronRight, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { BiomarkerDetailDrawer, type DrawerCard } from '@/features/biomarker-detail/BiomarkerDetailDrawer';
 
 type IconType = typeof Heart;
 
@@ -222,7 +222,7 @@ export function BiomarkersGrid() {
   const [cards, setCards] = useState<BiomarkerCard[]>([]);
   const [anchorDay, setAnchorDay] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -586,7 +586,7 @@ export function BiomarkersGrid() {
             <button
               key={c.key}
               type="button"
-              onClick={() => setSelectedKey(c.key)}
+              onClick={() => navigate(`/biomarker/${c.key}`)}
               className={`relative bg-ds-bg2 border border-white/[0.08] rounded-[18px] p-5 text-left transition-colors hover:bg-ds-bg2/80 hover:border-white/[0.15] active:scale-[0.995] ${isDim ? 'opacity-70' : ''}`}
             >
               {/* faixa de acento à esquerda */}
@@ -707,24 +707,6 @@ export function BiomarkersGrid() {
           );
         })}
       </div>
-
-      {selectedKey && (() => {
-        const c = cards.find((x) => x.key === selectedKey);
-        if (!c) return null;
-        const drawerCard: DrawerCard = {
-          key: c.key,
-          label: c.label,
-          Icon: c.Icon,
-          value: c.value,
-          rawNum: c.rawNum,
-          unit: c.unit,
-          decimals: c.decimals,
-          typical: c.typical,
-          colorVar: `--${c.key}-c`,
-          sourceLabel: c.sourceLabel,
-        };
-        return <BiomarkerDetailDrawer card={drawerCard} onClose={() => setSelectedKey(null)} />;
-      })()}
     </section>
   );
 }
