@@ -661,18 +661,23 @@ public class QRingPlugin: CAPPlugin, CAPBridgedPlugin {
             self.jsRequestNextHistory()
         }
 
-        // Phases 4-5 (realtime PPI + manual HR during sync) removed in build 368.
-        // Reason: cmd 0x11 was a phantom (not in official SDK X3); manual measurement
-        // with durationSec=15 is below the 30s SDK minimum and was rejected silently.
-        // Realtime PPG/RR/PPI is now triggered via "Medir Agora" button → cmd 0x78
-        // with native 1Hz keepalive timer (jsStartPPGMeasurement).
+        // Phase 4: Auto-capture PPG 30s (build 405, ajustado em 406).
+        // Build 405 colocou Phase 4 em t+45s, mas sync do Diego encerrou em 38s
+        // (BLE disconnect prematuro após history dump) — Phase 4 não disparava
+        // a tempo. Build 406 move pra t+5s, rodando em PARALELO com Phase 3
+        // history queue. PPG (cmd 0x78) usa canal de notify independente da
+        // pagination — BLE notify channel suporta interleave. Captura completa
+        // de 30s termina em t+35s, bem antes do disconnect típico (~38s).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self = self else { return }
+            NSLog("[QRing] JS sync Phase 4: auto-PPG capture 30s start (t+5s, parallel with history)")
+            self.jsStartPPGMeasurement(durationSec: 30)
+        }
 
-        // Phase 6: Resolve (t+75s)
-        // 35→75s in build 404. With 7 history cmds × 12s per-step safety timer,
-        // worst case is 84s. Plus actual pagination time for HR backlog (Diego
-        // had 224 HR packets in 36h = many continuations). 35s was firing before
-        // queue reached temp/steps in the request order.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 75.0) { [weak self] in
+        // Phase 6: Resolve (t+90s)
+        // 35s → 75s em build 404, 75s → 90s em 405. Mantém 90s no 406 mesmo
+        // com Phase 4 antecipada — buffer pra late history packets + PPG flush.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 90.0) { [weak self] in
             guard let self = self else { return }
             // Cancel remaining history queue + timer so late responses don't
             // leak into the next sync session.

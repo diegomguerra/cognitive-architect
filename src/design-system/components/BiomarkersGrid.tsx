@@ -187,15 +187,30 @@ export function BiomarkersGrid() {
           }
 
           if (rowsToUse.length === 0) return null;
-          let totalMin = 0, rem = 0, light = 0, deep = 0;
+          // Dedup por minuto: parse-vendor-raw emite múltiplos records (vindos
+          // de packets de paginação que se sobrepõem temporalmente) cobrindo
+          // o mesmo intervalo da noite. Somar duration_min ingenuamente gera
+          // 39h+ por noite. Constrói timeline: cada minuto recebe um único
+          // stage (o primeiro que chega), depois conta minutos por stage.
+          const minuteStage = new Map<number, string>(); // minute_epoch → stage
           for (const r of rowsToUse) {
-            const stage = ((r.payload_json as Record<string, unknown>)?.stage ?? '') as string;
+            const stage = (((r.payload_json as Record<string, unknown>)?.stage ?? '') as string).toLowerCase();
+            if (!stage) continue;
+            const startMs = new Date(r.ts).getTime();
             const dur = Number((r.payload_json as Record<string, unknown>)?.duration_min ?? 1);
-            totalMin += dur;
-            const s = stage.toLowerCase();
-            if (s.includes('rem')) rem += dur;
-            else if (s.includes('deep') || s.includes('profundo')) deep += dur;
-            else if (s.includes('light') || s.includes('leve')) light += dur;
+            const minuteCount = Math.max(1, Math.round(dur));
+            const startMinute = Math.floor(startMs / 60_000);
+            for (let m = 0; m < minuteCount; m++) {
+              const key = startMinute + m;
+              if (!minuteStage.has(key)) minuteStage.set(key, stage);
+            }
+          }
+          let totalMin = 0, rem = 0, light = 0, deep = 0;
+          for (const stage of minuteStage.values()) {
+            totalMin += 1;
+            if (stage.includes('rem')) rem += 1;
+            else if (stage.includes('deep') || stage.includes('profundo')) deep += 1;
+            else if (stage.includes('light') || stage.includes('leve')) light += 1;
           }
           const out: SleepBreakdown = {
             totalHours: Math.round((totalMin / 60) * 10) / 10,
@@ -210,24 +225,43 @@ export function BiomarkersGrid() {
 
         // Aggregations
         const hr = aggregate(hrRows, (xs) => mean(xs), [30, 220]);
-        const hrv = aggregate(hrvRows, (xs) => xs[0] ?? null, [5, 250]); // most-recent (rows pré-ordenados)
+        // HRV: filtra samples marcados como 'noisy_multichannel' pelo parse-vendor-raw v16.
+        // Preferimos amostra clean (mesmo que stale) sobre noisy fresh — sinal multi-canal
+        // PPG sem decode produz RMSSD inflado. Fallback pra noisy só se não houver clean.
+        const cleanHrvRows = hrvRows.filter((r) => {
+          const q = (r.payload_json as Record<string, unknown>)?.hrv_quality;
+          return q == null || q === 'clean' || q === 'clean_filtered';
+        });
+        const hrvSourceRows = cleanHrvRows.length > 0 ? cleanHrvRows : hrvRows;
+        const hrv = aggregate(hrvSourceRows, (xs) => xs[0] ?? null, [5, 250]); // most-recent (rows pré-ordenados)
         const spo2 = aggregate(spo2Rows, (xs) => mean(xs), [70, 100]);
         const rr = aggregate(rrRows, (xs) => mean(xs), [200, 2000]);
         const temp = aggregate(tempRows, (xs) => xs[0] ?? null, [25, 42]);
         const stress = aggregate(stressRows, (xs) => xs[0] ?? null, [0, 100]);
         const stepsAgg = aggregate(stepsRows, (xs) => Math.max(...xs));
 
-        // RHR: direct measure first, else derive from HR p10 of anchor day
+        // RHR: prefere derivação p10 do HR do anchor day (fresco) sobre RHR
+        // direto stale. Lógica anterior aceitava direct mesmo quando stale,
+        // travando o card no último RHR síncrono (Diego: 16/05 19:04 BRT)
+        // enquanto havia 393 HR samples de hoje. Nova ordem:
+        //   1. direct RHR no anchor day (fresco) — usa
+        //   2. >=5 HR no anchor day — deriva p10 (fresco)
+        //   3. direct RHR stale ou HR p10 7d — fallback marcado isStale
         const rhr = (() => {
           const direct = aggregate(rhrRows, (xs) => mean(xs), [30, 100]);
-          if (direct.value != null) return { ...direct, derived: false };
+          if (direct.value != null && !direct.isStale) {
+            return { ...direct, derived: false };
+          }
           const hrVals = numValues(inAnchorDay(hrRows)).filter((v) => v >= 30 && v <= 220);
           if (hrVals.length >= 5) {
             const sorted = [...hrVals].sort((a, b) => a - b);
             const p10idx = Math.max(0, Math.floor(sorted.length * 0.1) - 1);
             return { value: sorted[p10idx], n: hrVals.length, ts: lastTs(inAnchorDay(hrRows)), isStale: false, derived: true };
           }
-          // Fallback 7d: derive from full HR
+          if (direct.value != null) {
+            // direct stale, sem HR no anchor day — usa direct stale
+            return { ...direct, derived: false };
+          }
           const allHr = numValues(hrRows).filter((v) => v >= 30 && v <= 220);
           if (allHr.length >= 5) {
             const sorted = [...allHr].sort((a, b) => a - b);
@@ -237,13 +271,21 @@ export function BiomarkersGrid() {
           return { ...direct, derived: false };
         })();
 
-        // Stress fallback: derive from HRV if direct missing
+        // Stress: prefere HRV-derived quando direct está stale E HRV está fresh
+        // (cmd 0x56 do anel JStyle emite stress raramente — derivar de HRV fresco
+        // dá valor mais útil que stress direto de dias atrás).
         const stressFinal = (() => {
+          const hrvDerived = hrv.value != null
+            ? { value: Math.max(0, Math.min(100, 100 - hrv.value * 1.2)), n: hrv.n, ts: hrv.ts, isStale: hrv.isStale, derived: true }
+            : null;
+          // Se direct stress fresh, usa direct
+          if (stress.value != null && !stress.isStale) return { ...stress, derived: false };
+          // Se HRV fresh, prefere HRV-derived sobre direct stale
+          if (hrvDerived && !hrvDerived.isStale) return hrvDerived;
+          // Ambos stale ou só direct existe: usa direct stale
           if (stress.value != null) return { ...stress, derived: false };
-          if (hrv.value != null) {
-            const v = Math.max(0, Math.min(100, 100 - hrv.value * 1.2));
-            return { value: v, n: hrv.n, ts: hrv.ts, isStale: hrv.isStale, derived: true };
-          }
+          // Só HRV stale resta: usa HRV-derived stale
+          if (hrvDerived) return hrvDerived;
           return { ...stress, derived: false };
         })();
 
@@ -360,58 +402,64 @@ export function BiomarkersGrid() {
     <section className="px-1 mt-8">
       <div className="flex items-baseline justify-between mb-4">
         <h3
-          className="text-[22px] font-light tracking-[-0.01em] text-ds-ink0"
+          className="text-[24px] font-light tracking-[-0.01em] text-ds-ink0"
           style={{ fontFamily: '"Inter Tight", Inter, sans-serif' }}
         >
           Biomarcadores · {anchorDay ? formatDay(anchorDay) : ''}
         </h3>
-        <span className="font-mono text-[10px] tracking-wide2 uppercase text-ds-ink2">
+        <span className="font-mono text-[11px] tracking-wide2 uppercase text-ds-ink2">
           {filledCount}/{totalCount} hoje
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2.5">
         {cards.map((c) => {
           const isNull = c.rawNum == null;
           // 2026-05-16: só desbota quando NÃO há dado nenhum nem em 7d.
           // Cards "anterior" mantêm cor normal — diferenciação é só o badge.
           const isDim = isNull;
           return (
-            <div
+            <button
               key={c.key}
-              className="bg-ds-bg2 border border-white/[0.08] rounded-[4px] p-3"
+              type="button"
+              onClick={() => {
+                // TODO: abrir drawer de detalhe (ver mockups/biomarker-detail-drawer.html)
+                // Próximo passo: navegar pra /insights/biomarker/${c.key} ou abrir Sheet.
+                console.debug('[biomarker] card click', c.key);
+              }}
+              className="bg-ds-bg2 border border-white/[0.08] rounded-[10px] p-4 text-left transition-colors active:bg-ds-bg2/70 hover:border-white/[0.15] disabled:cursor-default"
             >
-              <div className="flex items-center gap-1.5 mb-2">
-                <c.Icon size={12} strokeWidth={1.5} className={isDim ? 'text-ds-ink3' : 'text-ds-ink1'} />
-                <span className={`font-mono text-[10px] tracking-wide2 uppercase ${isDim ? 'text-ds-ink3' : 'text-ds-ink2'} flex-1 truncate`}>
+              <div className="flex items-center gap-2 mb-3">
+                <c.Icon size={16} strokeWidth={1.5} className={isDim ? 'text-ds-ink3' : 'text-ds-ink1'} />
+                <span className={`font-mono text-[11px] tracking-wide2 uppercase ${isDim ? 'text-ds-ink3' : 'text-ds-ink1'} flex-1 truncate`}>
                   {c.label}
                 </span>
                 {c.isStale && !isNull && (
-                  <span className="font-mono text-[8px] tracking-wide1 text-ds-ink3 uppercase whitespace-nowrap">
+                  <span className="font-mono text-[9px] tracking-wide1 text-ds-ink3 uppercase whitespace-nowrap">
                     anterior
                   </span>
                 )}
               </div>
-              <div className={`font-mono text-[24px] tracking-[-0.02em] leading-none ${isDim ? 'text-ds-ink3' : 'text-ds-ink0'}`}
+              <div className={`font-mono text-[32px] font-medium tracking-[-0.02em] leading-none ${isDim ? 'text-ds-ink3' : 'text-ds-ink0'}`}
                    style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {c.value}
-                {!isNull && c.unit && <span className="text-[10px] text-ds-ink2 ml-1">{c.unit}</span>}
+                {!isNull && c.unit && <span className="text-[13px] font-normal text-ds-ink2 ml-1.5">{c.unit}</span>}
               </div>
               {c.detail && (
-                <div className="font-mono text-[9px] tracking-wide1 text-ds-ink2 mt-2 uppercase leading-tight">
+                <div className="font-mono text-[11px] tracking-wide1 text-ds-ink1 mt-2.5 uppercase leading-tight">
                   {c.detail}
                 </div>
               )}
               {c.qualityNote && (
-                <div className="font-mono text-[9px] tracking-wide1 text-ds-ink3 mt-1.5 italic">
+                <div className="font-mono text-[11px] tracking-wide1 text-ds-ink3 mt-1.5 italic normal-case">
                   {c.qualityNote}
                 </div>
               )}
               {c.lastTimestamp && (
-                <div className="font-mono text-[9px] tracking-wide1 text-ds-ink3 mt-1 uppercase">
+                <div className="font-mono text-[10px] tracking-wide1 text-ds-ink3 mt-1 uppercase">
                   Última: {c.lastTimestamp}
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>

@@ -1,11 +1,27 @@
-VYR 8.1(404) — Anel agora reporta temp, passos e HRV
+VYR 8.1(406) — HRV/Estresse fresh + PPG auto-capture cedo
 
 O que mudou
-- Plugin JStyle agora envia data de referência (BCD) nos requests de histórico (cmd 0x51 passos, 0x62 temp, 0x56 HRV). O SDK X3 oficial sempre embute essa data em pkt[4..9]; nossas builds anteriores enviavam só cmd+mode e o anel descartava silenciosamente passos/temp/HRV. Confirmado via disassembly de libBleSDK.a e via debug_raw do Diego (temp regrediu 14/05, passos 13/05).
-- Janela de sync ampliada de 35s → 75s. Com 7 cmds x 12s safety timer no pior caso eram necessarios >=84s; a resolve antiga abortava antes da fila chegar em temp/steps/sleep.
-- NSLog por emissao de history GET (cmd + bytes hex) — facilita auditoria remota via Console.app quando algum tipo nao chegar.
+- Phase 4 PPG do sync: movido de t+45s para t+5s. Anel JStyle X5 frequentemente
+  desconecta em ~38s apos history dump — Phase 4 antiga em t+45s nao disparava
+  a tempo. Agora roda em paralelo com Phase 3 history queue (cmd 0x78 PPG usa
+  canal de notify independente, suporta interleave com pagination). Captura
+  30s completa termina em t+35s, bem antes do disconnect tipico.
+- Frontend BiomarkersGrid: filtra HRV samples marcados como 'noisy_multichannel'
+  pelo parse-vendor-raw v16. Prefere amostra clean (mesmo stale) sobre noisy fresh
+  pra evitar exibir RMSSD inflado em sinal multi-canal nao-decodificado.
+- Frontend Estresse: prefere derivacao de HRV-fresh sobre stress direto stale.
+  Cmd 0x56 do anel emite stress raramente — quando HRV fresco existe, derivar
+  via formula (100 - hrv*1.2) e mais util que stress direto de dias atras.
 
-Bugs ainda abertos
-- "Medir Agora" em SpO2/FC da erro com anel Colmi (vendor mismatch — fix programado pra build 405).
-- Reconnect Colmi apos CONNECT_TIMEOUT exige workaround manual (carregador 2min + reboot + forget device). Hardening pra build 405.
-- parse-vendor-raw 0x27 (firmware version) ainda stub — devices.fw_version permanece null ate reverse engineering do layout.
+Edge function parse-vendor-raw v16 (Supabase) deployado em paralelo com:
+- Successive Difference Filter padrao Polar/Garmin/Kubios — Δ<100ms entre RRs
+  consecutivos identifica pares intra-canal vs channel-jumps. RMSSD calculado
+  apenas nos pares intra-canal = HRV honesto. Diego: 75% das transicoes eram
+  channel-jumps; SDF resgatou 18 pares limpos resultando em HRV=55ms (faixa
+  fisiologica saudavel) em vez do RMSSD raw=359ms.
+
+Bugs ainda abertos pra proximas builds
+- Decode multi-canal real do PPG (separar LEDs verde/vermelho/IR) — solucao
+  definitiva quando reverse engineering do formato estiver pronto.
+- "Medir Agora" Colmi mismatch.
+- Reconnect Colmi apos CONNECT_TIMEOUT manual workaround.
